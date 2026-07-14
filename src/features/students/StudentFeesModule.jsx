@@ -444,6 +444,10 @@ const PrintableStatement = ({ stu, stuClass, activeSession, stuLedgers, totalDue
           <p className="font-black text-lg uppercase">{stu.firstName} {stu.lastName}</p>
         </div>
         <div>
+          <p className="text-[10px] uppercase font-bold text-gray-500">Father's Name</p>
+          <p className="font-black text-lg uppercase">{stu.parent?.fatherName || stu.fatherName || 'N/A'}</p>
+        </div>
+        <div>
           <p className="text-[10px] uppercase font-bold text-gray-500">Class & Section</p>
           <p className="font-bold text-base">{stuClass?.name || 'N/A'}</p>
         </div>
@@ -463,6 +467,7 @@ const PrintableStatement = ({ stu, stuClass, activeSession, stuLedgers, totalDue
           <tr className="bg-gray-100 border-y-2 border-gray-900">
             <th className="py-2 px-2 border-x-2 border-gray-900">Date Due</th>
             <th className="py-2 px-2 border-x-2 border-gray-900">Fee Category</th>
+            <th className="py-2 px-2 border-x-2 border-gray-900">Receipt No</th>
             <th className="py-2 px-2 border-x-2 border-gray-900 text-right">Amount Due</th>
             <th className="py-2 px-2 border-x-2 border-gray-900 text-right">Amount Paid</th>
             <th className="py-2 px-2 border-x-2 border-gray-900 text-right">Balance</th>
@@ -471,17 +476,19 @@ const PrintableStatement = ({ stu, stuClass, activeSession, stuLedgers, totalDue
         <tbody>
           {stuLedgers.length === 0 ? (
             <tr className="border-b border-gray-900">
-              <td colSpan="5" className="py-4 text-center text-gray-500 font-bold border-x-2 border-gray-900">No ledgers planned for this student.</td>
+              <td colSpan="6" className="py-4 text-center text-gray-500 font-bold border-x-2 border-gray-900">No ledgers planned for this student.</td>
             </tr>
           ) : (
             stuLedgers.map((l) => {
               const due = l.amountDue ?? 0;
               const paid = l.amountPaid ?? 0;
               const bal = due - paid;
+              const receiptNos = l.receipts?.map(r => r.receiptNumber).join(', ') || '—';
               return (
                 <tr key={l.id} className="border-b border-gray-900 font-medium">
                   <td className="py-2 px-2 border-x-2 border-gray-900">{new Date(l.dueDate).toLocaleDateString()}</td>
                   <td className="py-2 px-2 border-x-2 border-gray-900 font-bold">{l.categoryName}</td>
+                  <td className="py-2 px-2 border-x-2 border-gray-900 font-bold text-gray-600">{receiptNos}</td>
                   <td className="py-2 px-2 border-x-2 border-gray-900 text-right">₹{due.toLocaleString()}</td>
                   <td className="py-2 px-2 border-x-2 border-gray-900 text-right text-emerald-600">₹{paid.toLocaleString()}</td>
                   <td className="py-2 px-2 border-x-2 border-gray-900 text-right font-bold text-rose-600">₹{bal.toLocaleString()}</td>
@@ -492,7 +499,7 @@ const PrintableStatement = ({ stu, stuClass, activeSession, stuLedgers, totalDue
         </tbody>
         <tfoot>
           <tr className="bg-gray-100 font-black text-gray-900 border-b-2 border-gray-900">
-            <td className="py-3 px-2 border-x-2 border-gray-900 text-right">TOTAL</td>
+            <td colSpan="3" className="py-3 px-2 border-x-2 border-gray-900 text-right">TOTAL</td>
             <td className="py-3 px-2 border-x-2 border-gray-900 text-right">₹{totalDue.toLocaleString()}</td>
             <td className="py-3 px-2 border-x-2 border-gray-900 text-right text-emerald-600">₹{totalPaid.toLocaleString()}</td>
             <td className="py-3 px-2 border-x-2 border-gray-900 text-right text-rose-600">₹{remaining.toLocaleString()}</td>
