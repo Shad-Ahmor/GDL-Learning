@@ -1,0 +1,474 @@
+# GLOBAL UI/UX CONSTITUTION (MANDATORY)
+
+THIS IS A NON-NEGOTIABLE DESIGN SYSTEM.
+
+EVERY SCREEN, COMPONENT, PAGE, FORM, TABLE, DASHBOARD, MODAL, CARD, CHART, NAVIGATION ELEMENT, REPORT PREVIEW, SETTINGS PANEL, LOGIN SCREEN, ACTIVATION SCREEN, AND MANAGEMENT MODULE MUST FOLLOW THIS DESIGN CONSTITUTION.
+
+NEVER GENERATE BORING UI.
+
+NEVER GENERATE BOOTSTRAP-LOOKING UI.
+
+NEVER GENERATE OLD ADMIN PANEL UI.
+
+NEVER GENERATE GENERIC CRUD SCREENS.
+
+THE SOFTWARE MUST LOOK LIKE A PREMIUM PRODUCT WORTH $10,000+.
+
+==================================================
+DESIGN PHILOSOPHY
+=================
+
+Take inspiration from:
+
+* Apple
+* Linear
+* Notion
+* Arc Browser
+* Raycast
+* Figma
+* Stripe Dashboard
+* Adobe Creative Cloud
+* Framer
+* Vercel Dashboard
+
+The interface should feel:
+
+* Luxurious
+* Premium
+* Modern
+* Fast
+* Intelligent
+* Minimal
+* Elegant
+* Expensive
+* Enterprise Grade
+
+==================================================
+MANDATORY FRONTEND STACK
+========================
+
+Use:
+
+* Tailwind CSS
+* Shadcn UI
+* Radix UI
+* Framer Motion
+* Lucide Icons
+* Recharts
+
+Do not use:
+
+* Bootstrap
+* Material UI
+* Bulky component libraries
+* Outdated admin templates
+
+==================================================
+VISUAL DESIGN RULES
+===================
+
+Use:
+
+* Rounded corners everywhere
+* rounded-2xl minimum
+* rounded-3xl preferred
+
+Use:
+
+* Soft shadows
+* layered shadows
+* depth effects
+
+Use:
+
+* Glassmorphism
+* subtle blur effects
+* premium transparency
+
+Use:
+
+* rich gradients
+* modern color palettes
+
+Avoid:
+
+* harsh borders
+* ugly boxes
+* square corners
+* outdated gradients
+
+==================================================
+COLOR SYSTEM
+============
+
+LIGHT MODE
+
+Background:
+
+#fafafa
+
+Cards:
+
+Pure White
+
+Accent:
+
+Blue
+Indigo
+Purple
+
+Success:
+
+Emerald
+
+Warning:
+
+Amber
+
+Danger:
+
+Rose
+
+DARK MODE
+
+Background:
+
+Near Black
+
+Cards:
+
+Dark Graphite
+
+Accent:
+
+Electric Blue
+
+Success:
+
+Emerald
+
+Warning:
+
+Amber
+
+Danger:
+
+Rose
+
+Never use overly saturated colors.
+
+==================================================
+TYPOGRAPHY SYSTEM
+=================
+
+Use premium typography hierarchy.
+
+Headings:
+
+Bold
+Large
+Elegant
+
+Body:
+
+Readable
+Professional
+
+Never use:
+
+Tiny text
+Crowded spacing
+Cheap-looking fonts
+
+Typography must resemble:
+
+Apple
+Linear
+Stripe
+
+==================================================
+SIDEBAR DESIGN
+==============
+
+Sidebar must be:
+
+Floating
+
+Glassmorphic
+
+Collapsible
+
+Animated
+
+Rounded
+
+Luxury looking
+
+Features:
+
+* Icons
+* Hover animations
+* Active indicator
+* Smooth transitions
+
+==================================================
+DASHBOARD DESIGN
+================
+
+Dashboard must include:
+
+Animated statistic cards
+
+Live counters
+
+Trend indicators
+
+Beautiful charts
+
+Quick actions
+
+Recent activity timeline
+
+Upcoming reminders
+
+Calendar widgets
+
+The dashboard must impress users within 5 seconds.
+
+==================================================
+TABLE DESIGN
+============
+
+Tables must be world-class.
+
+Features:
+
+* Search
+* Filter
+* Sorting
+* Pagination
+* Export
+* Row Actions
+* Sticky Header
+
+Rows must have:
+
+Hover effects
+
+Smooth animations
+
+Professional spacing
+
+==================================================
+FORM DESIGN
+===========
+
+Every form must include:
+
+Live validation
+
+Inline feedback
+
+Auto formatting
+
+Elegant labels
+
+Smart placeholders
+
+Keyboard navigation
+
+Sections must be grouped inside beautiful cards.
+
+==================================================
+MODAL DESIGN
+============
+
+Use premium modal windows.
+
+Features:
+
+Blur background
+
+Smooth animations
+
+Rounded corners
+
+Keyboard shortcuts
+
+ESC close
+
+Focus trap
+
+==================================================
+BUTTON DESIGN
+=============
+
+Buttons must have:
+
+Hover animation
+
+Press animation
+
+Loading state
+
+Success state
+
+Disabled state
+
+Never create flat boring buttons.
+
+==================================================
+CARD DESIGN
+===========
+
+Cards must have:
+
+Depth
+
+Hover effect
+
+Smooth transitions
+
+Elegant spacing
+
+Premium visual hierarchy
+
+==================================================
+ANIMATIONS
+==========
+
+Use Framer Motion.
+
+Every interaction should feel alive.
+
+Include:
+
+Hover animations
+
+Page transitions
+
+Card transitions
+
+Sidebar transitions
+
+Modal transitions
+
+Loading transitions
+
+Animation duration:
+
+150ms–350ms
+
+Avoid excessive animation.
+
+==================================================
+LOADING STATES
+==============
+
+Never use plain text loading.
+
+Always update:
+
+Skeleton loaders
+
+Shimmer effects
+
+Progress indicators
+
+==================================================
+EMPTY STATES
+============
+
+Every empty state must contain:
+
+Illustration
+
+Helpful message
+
+Action button
+
+Premium design
+
+==================================================
+SEARCH EXPERIENCE
+=================
+
+Implement:
+
+Global Search
+
+Command Palette
+
+Keyboard Shortcuts
+
+CTRL + K support
+
+Similar to:
+
+Raycast
+
+Linear
+
+Notion
+
+==================================================
+REPORTS
+=======
+
+PDF previews must look luxurious.
+
+Print layouts must resemble:
+
+Professional accounting software.
+
+==================================================
+RESPONSIVENESS
+==============
+
+Support:
+
+Large Desktop
+
+Laptop
+
+Tablet
+
+High Resolution Displays
+
+==================================================
+ACCESSIBILITY
+=============
+
+Keyboard navigation
+
+Focus states
+
+ARIA support
+
+High contrast support
+
+==================================================
+PERFORMANCE
+===========
+
+Animations must remain smooth.
+
+UI must feel instant.
+
+Avoid unnecessary re-renders.
+
+Optimize all tables and charts.
+
+==================================================
+FINAL RULE
+==========
+
+Before generating any screen, ask:
+
+"Would this design look good enough to compete with Apple, Notion, Linear, Stripe, and Adobe?"
+
+If the answer is NO,
+
+REDESIGN IT UNTIL THE ANSWER IS YES.
+
+This rule overrides all other UI instructions.

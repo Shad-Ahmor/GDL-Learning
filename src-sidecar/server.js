@@ -1,0 +1,3431 @@
+import express from 'express';
+import cors from 'cors';
+import { PrismaClient } from '@prisma/client';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const getAppDir = () => {
+  const home = os.homedir();
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'com.gdll.learning');
+  } else if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'com.gdll.learning');
+  } else {
+    return path.join(home, '.config', 'com.gdll.learning');
+  }
+};
+const appDir = getAppDir();
+const dbsDir = path.join(appDir, 'databases');
+if (!fs.existsSync(appDir)) fs.mkdirSync(appDir, { recursive: true });
+if (!fs.existsSync(dbsDir)) fs.mkdirSync(dbsDir, { recursive: true });
+
+const globalDbPath = path.join(dbsDir, 'dev.db');
+const bundledDbPath = path.resolve(__dirname, '..', 'prisma', 'dev.db');
+
+const shouldCopy = !fs.existsSync(globalDbPath) || 
+                   (fs.existsSync(globalDbPath) && fs.statSync(globalDbPath).size < 50000);
+
+if (shouldCopy && fs.existsSync(bundledDbPath)) {
+  try {
+    fs.copyFileSync(bundledDbPath, globalDbPath);
+    console.log('[GDL DB Engine] Successfully initialized database template in AppData.');
+  } catch (err) {
+    console.error('[GDL DB Engine] Failed to copy database template:', err);
+  }
+}
+
+const prisma = new PrismaClient({
+  datasources: { db: { url: `file:${globalDbPath}` } }
+});
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const tenantClients = {};
+
+app.use(async (req, res, next) => {
+  const tenantId = req.headers['x-tenant-id'];
+  console.log('[GDL Middleware] API Hit:', req.path, '| Tenant Header:', tenantId);
+  
+  if (!tenantId || tenantId === 'superadmin') {
+    req.prisma = prisma; // the global dev.db
+    return next();
+  }
+
+  if (tenantClients[tenantId]) {
+    req.prisma = tenantClients[tenantId];
+    return next();
+  }
+
+  if (!global.initLocks) global.initLocks = {};
+
+  if (!global.initLocks[tenantId]) {
+    global.initLocks[tenantId] = (async () => {
+      try {
+        const sanitizedTenant = Buffer.from(tenantId).toString('hex');
+        const dbPath = path.join(dbsDir, `tenant_${sanitizedTenant}.db`);
+        const isNewTenant = !fs.existsSync(dbPath);
+
+        if (isNewTenant) {
+          console.log(`[GDL Tenant Engine] Initializing new database for tenant: ${tenantId}`);
+          fs.copyFileSync(globalDbPath, dbPath);
+          
+          const newPrisma = new PrismaClient({
+            datasources: { db: { url: `file:${dbPath}` } }
+          });
+          
+          // Clear school specific tables to give a fresh start
+          const tablesToWipe = [
+            'WhiteLabelConfig', 'AcademicSession', 'Term', 'Class', 'Section', 
+            'MasterSubject', 'Subject', 'Student', 'Parent', 'FeeCategory', 
+            'FeeLedger', 'FeeReceipt', 'AccountTransaction', 'StudentAttendance', 
+            'Employee', 'Payslip', 'LeaveRequest', 'EmployeeAttendance', 
+            'Exam', 'ExamSubject', 'QuestionPaper', 'Question', 'ExamDuty', 
+            'ExamEvaluationDuty', 'ExamMark', 'User', 'ClientToken', 'License'
+          ];
+          
+          await newPrisma.$executeRawUnsafe('PRAGMA foreign_keys = OFF;');
+          for (const table of tablesToWipe) {
+            try {
+              await newPrisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
+            } catch (e) {
+              console.error(`Error wiping ${table}:`, e.message);
+            }
+          }
+          
+          try {
+            await newPrisma.$executeRawUnsafe(`DELETE FROM "Role" WHERE "name" = 'Super Admin'`);
+          } catch (e) {}
+
+          try {
+            // Fetch the real school name from global dev.db
+            const tokenRecord = await prisma.clientToken.findUnique({ where: { email: tenantId } });
+            if (tokenRecord && tokenRecord.schoolName) {
+              await newPrisma.whiteLabelConfig.create({
+                data: { schoolName: tokenRecord.schoolName, themeColor: '#4F46E5' }
+              });
+            }
+          } catch (e) {
+            console.error('Error prefilling WhiteLabelConfig:', e.message);
+          }
+          await newPrisma.$executeRawUnsafe('PRAGMA foreign_keys = ON;');
+          
+          tenantClients[tenantId] = newPrisma;
+        } else {
+          const existingPrisma = new PrismaClient({
+            datasources: { db: { url: `file:${dbPath}` } }
+          });
+          tenantClients[tenantId] = existingPrisma;
+        }
+      } catch (err) {
+        console.error('[GDL Tenant Engine] Init error:', err);
+        throw err;
+      }
+    })();
+  }
+
+  try {
+    await global.initLocks[tenantId];
+    req.prisma = tenantClients[tenantId];
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Tenant initialization failed' });
+  }
+});
+
+
+// ==========================================
+// API ROUTES
+// ==========================================
+
+// Licensing
+app.post('/api/license/verify', async (req, res) => {
+  try {
+    const { hardwarePrint } = req.body;
+    const license = await req.prisma.license.findUnique({
+      where: { hardwarePrint }
+    });
+    if (!license) return res.json({ valid: false });
+    
+    // Check expiry
+    const now = new Date();
+    if (new Date(license.expiryDate) < now || !license.isActive) {
+      return res.json({ valid: false, reason: 'EXPIRED_OR_INACTIVE' });
+    }
+    
+    res.json({ valid: true, license });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/license/activate', async (req, res) => {
+  try {
+    const data = req.body;
+    const license = await req.prisma.license.create({
+      data: {
+        ...data,
+        activationDate: new Date()
+      }
+    });
+    res.json(license);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Auth
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, passwordHash } = req.body;
+    const user = await req.prisma.user.findUnique({
+      where: { username },
+      include: { role: true }
+    });
+    if (!user || user.passwordHash !== passwordHash) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'Account inactive' });
+    }
+    
+    // Parse permissions from the role
+    const permissions = user.role ? JSON.parse(user.role.permissions || '[]') : [];
+    
+    res.json({
+      id: user.id,
+      username: user.username,
+      isActive: user.isActive,
+      employeeId: user.employeeId,
+      role: user.role ? user.role.name : 'No Role',
+      roleId: user.roleId,
+      permissions
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// SUPER ADMIN & TOKENS ENDPOINTS
+// ==========================================
+
+// GET all client tokens
+app.get('/api/superadmin/tokens', async (req, res) => {
+  try {
+    const tokens = await req.prisma.clientToken.findMany({
+      orderBy: { generatedAt: 'desc' }
+    });
+    res.json(tokens.map(t => ({
+      ...t,
+      permissions: JSON.parse(t.permissions || '[]')
+    })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CREATE / Save generated token
+app.post('/api/superadmin/tokens', async (req, res) => {
+  try {
+    const { email, schoolName, tokenString, permissions } = req.body;
+    
+    const existing = await req.prisma.clientToken.findUnique({ where: { email } });
+    if (existing) {
+      // update if exists
+      const updated = await req.prisma.clientToken.update({
+        where: { email },
+        data: {
+          schoolName,
+          tokenString,
+          permissions: JSON.stringify(permissions || []),
+          generatedAt: new Date()
+        }
+      });
+      return res.json({ ...updated, permissions: JSON.parse(updated.permissions) });
+    }
+
+    const token = await req.prisma.clientToken.create({
+      data: {
+        email,
+        schoolName,
+        tokenString,
+        permissions: JSON.stringify(permissions || [])
+      }
+    });
+    res.json({ ...token, permissions: JSON.parse(token.permissions) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// UPDATE token permissions
+app.put('/api/superadmin/tokens/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { permissions } = req.body;
+    
+    const updated = await req.prisma.clientToken.update({
+      where: { id },
+      data: { permissions: JSON.stringify(permissions || []) }
+    });
+    res.json({ ...updated, permissions: JSON.parse(updated.permissions) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE token
+app.delete('/api/superadmin/tokens/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await req.prisma.clientToken.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// ROLE MANAGEMENT ENDPOINTS
+// ==========================================
+
+// Seed default system roles if they don't exist
+app.post('/api/roles/seed', async (req, res) => {
+  try {
+    const ALL_PERMISSIONS = [
+      'manage_students', 'manage_staff', 'manage_finance', 'manage_hr',
+      'manage_attendance', 'manage_exams', 'manage_reports', 'manage_library',
+      'manage_transport', 'manage_hostel', 'manage_inventory', 'manage_visitors',
+      'manage_timetable', 'manage_setup', 'manage_roles', 'view_dashboard'
+    ];
+
+    const existingSuperAdmin = await req.prisma.role.findUnique({ where: { name: 'Super Admin' } });
+    if (!existingSuperAdmin) {
+      await req.prisma.role.create({
+        data: {
+          name: 'Super Admin',
+          description: 'Full system access. Cannot be modified.',
+          permissions: JSON.stringify(ALL_PERMISSIONS),
+          isSystem: true
+        }
+      });
+    }
+
+    const existingAdmin = await req.prisma.role.findUnique({ where: { name: 'Admin' } });
+    if (!existingAdmin) {
+      // Admin gets all permissions except role management by default
+      const adminPerms = ALL_PERMISSIONS.filter(p => p !== 'manage_roles');
+      await req.prisma.role.create({
+        data: {
+          name: 'Admin',
+          description: 'School administrator. Manages school operations.',
+          permissions: JSON.stringify(adminPerms),
+          isSystem: true
+        }
+      });
+    }
+    res.json({ success: true, message: 'Default roles seeded.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET all roles
+app.get('/api/roles', async (req, res) => {
+  try {
+    const roles = await req.prisma.role.findMany({
+      include: { _count: { select: { users: true } } },
+      orderBy: { createdAt: 'asc' }
+    });
+    // Parse permissions from JSON string to array for each role
+    const result = roles.map(r => ({
+      ...r,
+      permissions: JSON.parse(r.permissions || '[]')
+    }));
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CREATE a new role
+app.post('/api/roles', async (req, res) => {
+  try {
+    const { name, description, permissions } = req.body;
+    if (!name) return res.status(400).json({ error: 'Role name is required' });
+    const role = await req.prisma.role.create({
+      data: {
+        name,
+        description: description || '',
+        permissions: JSON.stringify(permissions || []),
+        isSystem: false
+      }
+    });
+    res.json({ ...role, permissions: JSON.parse(role.permissions) });
+  } catch (error) {
+    if (error.code === 'P2002') return res.status(400).json({ error: 'A role with this name already exists.' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// UPDATE a role's permissions
+app.put('/api/roles/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, permissions } = req.body;
+    const existing = await req.prisma.role.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Role not found' });
+    if (existing.name === 'Super Admin') {
+      return res.status(403).json({ error: 'Super Admin role cannot be modified.' });
+    }
+    const updated = await req.prisma.role.update({
+      where: { id },
+      data: {
+        name: existing.isSystem ? existing.name : (name || existing.name),
+        description: description !== undefined ? description : existing.description,
+        permissions: JSON.stringify(permissions || [])
+      }
+    });
+    res.json({ ...updated, permissions: JSON.parse(updated.permissions) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE a role (only non-system roles)
+app.delete('/api/roles/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await req.prisma.role.findUnique({ where: { id }, include: { _count: { select: { users: true } } } });
+    if (!existing) return res.status(404).json({ error: 'Role not found' });
+    if (existing.isSystem) return res.status(403).json({ error: 'System roles cannot be deleted.' });
+    if (existing._count.users > 0) return res.status(400).json({ error: `This role is assigned to ${existing._count.users} user(s). Please reassign them first.` });
+    await req.prisma.role.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// USER ACCOUNT MANAGEMENT ENDPOINTS
+// ==========================================
+
+// GET all users
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await req.prisma.user.findMany({
+      include: { role: true },
+      orderBy: { createdAt: 'asc' }
+    });
+    res.json(users.map(u => ({ ...u, passwordHash: undefined })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CREATE a new user
+app.post('/api/users', async (req, res) => {
+  try {
+    const { username, passwordHash, roleId, employeeId } = req.body;
+    if (!username || !passwordHash) return res.status(400).json({ error: 'Username and password are required.' });
+    const user = await req.prisma.user.create({
+      data: { username, passwordHash, roleId: roleId || null, employeeId: employeeId || null },
+      include: { role: true }
+    });
+    res.json({ ...user, passwordHash: undefined });
+  } catch (error) {
+    if (error.code === 'P2002') return res.status(400).json({ error: 'Username already exists.' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// UPDATE a user (role, active status)
+app.put('/api/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { roleId, isActive, passwordHash } = req.body;
+    const data = {};
+    if (roleId !== undefined) data.roleId = roleId;
+    if (isActive !== undefined) data.isActive = isActive;
+    if (passwordHash) data.passwordHash = passwordHash;
+    const user = await req.prisma.user.update({
+      where: { id },
+      data,
+      include: { role: true }
+    });
+    res.json({ ...user, passwordHash: undefined });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE a user
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    await req.prisma.user.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add more CRUD routes as needed for the ERP modules...
+
+app.get('/api/students', async (req, res) => {
+  try {
+    const { classId, sectionId, sessionId } = req.query;
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    if (!targetSessionId) return res.json([]);
+
+    const where = { sessionId: targetSessionId, status: 'Active' };
+    if (classId) where.classId = classId;
+    if (sectionId) where.sectionId = sectionId;
+
+    let enrollments = await req.prisma.studentSession.findMany({
+      where,
+      include: { 
+        student: { include: { parent: true } }, 
+        class: true, 
+        section: true 
+      }
+    });
+    
+    let students = enrollments.map(enr => ({
+      ...enr.student,
+      classId: enr.classId,
+      sectionId: enr.sectionId,
+      rollNumber: enr.rollNumber,
+      status: enr.status,
+      class: enr.class,
+      section: enr.section,
+      studentSessionId: enr.id,
+      sessionId: enr.sessionId
+    }));
+    students.sort((a, b) => new Date(b.admissionDate) - new Date(a.admissionDate));
+    
+    res.json(students);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Finance
+app.get('/api/finance/transactions', async (req, res) => {
+  try {
+    const manualTxs = await req.prisma.accountTransaction.findMany({
+      orderBy: { date: 'desc' }
+    });
+    
+    const receipts = await req.prisma.feeReceipt.findMany({
+      include: {
+        ledger: {
+          include: {
+            student: true,
+            category: true
+          }
+        }
+      },
+      orderBy: { paymentDate: 'desc' }
+    });
+    
+    const slips = await req.prisma.payslip.findMany({
+      where: { status: 'Paid' },
+      include: {
+        employee: true
+      }
+    });
+
+    const consolidated = [];
+
+    manualTxs.forEach(tx => {
+      consolidated.push({
+        id: tx.id,
+        type: tx.type, // 'Income' or 'Expense'
+        source: 'Manual',
+        category: tx.category,
+        amount: tx.amount,
+        date: tx.date,
+        description: tx.description || 'Miscellaneous Entry',
+        referenceNo: tx.referenceNo || 'N/A'
+      });
+    });
+
+    receipts.forEach(rec => {
+      const studentName = rec.ledger?.student 
+        ? `${rec.ledger.student.firstName} ${rec.ledger.student.lastName}` 
+        : 'Unknown Student';
+      consolidated.push({
+        id: rec.id,
+        type: 'Income',
+        source: 'Fee Collection',
+        category: rec.ledger?.category?.name || 'Student Fee',
+        amount: rec.amount,
+        date: rec.paymentDate,
+        description: `Fee Receipt for ${studentName} (Adm No: ${rec.ledger?.student?.admissionNumber || 'N/A'})`,
+        referenceNo: rec.receiptNumber
+      });
+    });
+
+    slips.forEach(slip => {
+      const empName = slip.employee 
+        ? `${slip.employee.firstName} ${slip.employee.lastName}` 
+        : 'Unknown Employee';
+      const slipDate = new Date(slip.year, slip.month - 1, 15);
+      consolidated.push({
+        id: slip.id,
+        type: 'Expense',
+        source: 'Staff Payroll',
+        category: 'Salary Payout',
+        amount: slip.netPay,
+        date: slipDate,
+        description: `Salary payout to ${empName} (${slip.employee?.employeeId}) for ${slip.month}/${slip.year}`,
+        referenceNo: `PAY-${slip.id.substring(0, 6).toUpperCase()}`
+      });
+    });
+
+    consolidated.sort((a, b) => new Date(b.date) - new Date(a.date));
+    res.json(consolidated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/finance/transactions', async (req, res) => {
+  try {
+    const { type, category, amount, date, description, referenceNo } = req.body;
+    const tx = await req.prisma.accountTransaction.create({
+      data: {
+        type,
+        category,
+        amount: parseFloat(amount),
+        date: new Date(date || undefined),
+        description,
+        referenceNo
+      }
+    });
+    res.json(tx);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/finance/transactions/:id', async (req, res) => {
+  try {
+    await req.prisma.accountTransaction.delete({
+      where: { id: req.params.id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// HR
+app.get('/api/hr/employees', async (req, res) => {
+  try {
+    let emps = await req.prisma.employee.findMany();
+    res.json(emps);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST Student
+app.post('/api/students', async (req, res) => {
+  try {
+    const { firstName, lastName, admissionNo, rollNumber, sessionId } = req.body;
+    
+    // Ensure relations exist
+    let session = await req.prisma.academicSession.findFirst({ where: { id: sessionId || undefined } });
+    if (!session) session = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+    if (!session) session = await req.prisma.academicSession.create({ data: { name: '2024-2025', startDate: new Date(), endDate: new Date(), isActive: true } });
+    
+    let defaultClass = await req.prisma.class.findFirst();
+    if (!defaultClass) {
+       defaultClass = await req.prisma.class.create({ data: { name: 'Class 10', sessionId: session.id } });
+    }
+    
+    let defaultSection = await req.prisma.section.findFirst({ where: { classId: defaultClass.id } });
+    if (!defaultSection) {
+       defaultSection = await req.prisma.section.create({ data: { name: 'A', classId: defaultClass.id } });
+    }
+
+    const newStudent = await req.prisma.student.create({
+      data: {
+        firstName,
+        lastName,
+        admissionNumber: admissionNo,
+        dob: new Date('2010-01-01'),
+        gender: 'Not Specified',
+        admissionDate: new Date()
+      }
+    });
+
+    const newEnrollment = await req.prisma.studentSession.create({
+      data: {
+        studentId: newStudent.id,
+        sessionId: session.id,
+        classId: defaultClass.id,
+        sectionId: defaultSection.id,
+        rollNumber,
+        status: 'Active'
+      },
+      include: { student: true, class: true, section: true }
+    });
+
+    res.json({
+      ...newEnrollment.student,
+      classId: newEnrollment.classId,
+      sectionId: newEnrollment.sectionId,
+      class: newEnrollment.class,
+      section: newEnrollment.section,
+      sessionId: newEnrollment.sessionId
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE Student
+app.delete('/api/students/:id', async (req, res) => {
+  try {
+    await req.prisma.student.delete({
+      where: { id: req.params.id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Selective Backup Export
+app.post('/api/system/backup/export', async (req, res) => {
+  try {
+    const { selectedModules } = req.body;
+    const activeDbPath = globalDbPath;
+    const tempDir = os.tmpdir();
+    const tempBackupPath = path.join(tempDir, `gdl_export_${Date.now()}.db`);
+    
+    // Copy active database file to a temporary location
+    fs.copyFileSync(activeDbPath, tempBackupPath);
+    
+    // Create new PrismaClient instance pointing to the temp database
+    const tempPrisma = new PrismaClient({
+      datasources: {
+        db: {
+          url: `file:${tempBackupPath}`
+        }
+      }
+    });
+    
+    // Define table groupings matching user selector modules
+    const moduleTables = {
+      setup: ['WhiteLabelConfig', 'AcademicSession', 'Term', 'Class', 'Section', 'MasterSubject', 'Subject'],
+      students: ['Student', 'Parent'],
+      finance: ['FeeCategory', 'FeeLedger', 'FeeReceipt', 'AccountTransaction'],
+      attendance: ['StudentAttendance'],
+      payroll: ['Employee', 'Payslip', 'LeaveRequest', 'EmployeeAttendance'],
+      exams: ['Exam', 'ExamSubject', 'QuestionPaper', 'Question', 'ExamDuty', 'ExamEvaluationDuty', 'ExamMark']
+    };
+    
+    // Clean up tables for any unselected modules in the backup copy
+    for (const [moduleKey, tables] of Object.entries(moduleTables)) {
+      if (!selectedModules || selectedModules[moduleKey] === false) {
+        for (const table of tables) {
+          try {
+            await tempPrisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
+          } catch (e) {
+            console.error(`Error deleting table ${table} during export:`, e);
+          }
+        }
+      }
+    }
+    
+    // Run VACUUM to shrink and compress SQLite file sizes
+    try {
+      await tempPrisma.$executeRawUnsafe('VACUUM');
+    } catch (e) {
+      console.error("Error executing VACUUM:", e);
+    }
+    
+    await tempPrisma.$disconnect();
+    
+    // Stream backup database file down to browser and cleanup temp file on complete
+    res.download(tempBackupPath, 'gdl_backup.db', (err) => {
+      try {
+        if (fs.existsSync(tempBackupPath)) {
+          fs.unlinkSync(tempBackupPath);
+        }
+      } catch (e) {
+        console.error("Error cleaning up temp backup file:", e);
+      }
+    });
+  } catch (error) {
+    console.error("Backup export failed:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Selective Backup Restore
+app.post('/api/system/backup/restore', express.raw({ type: 'application/octet-stream', limit: '50mb' }), async (req, res) => {
+  try {
+    const modulesHeader = req.headers['x-selected-modules'];
+    if (!modulesHeader) {
+      return res.status(400).json({ error: "Missing x-selected-modules header" });
+    }
+    
+    const selectedModules = JSON.parse(modulesHeader);
+    
+    // Save raw binary file to a temp file
+    const tempDir = os.tmpdir();
+    const tempRestorePath = path.join(tempDir, `gdl_restore_${Date.now()}.db`);
+    fs.writeFileSync(tempRestorePath, req.body);
+    
+    // Connect to uploaded backup database
+    const backupPrisma = new PrismaClient({
+      datasources: {
+        db: {
+          url: `file:${tempRestorePath}`
+        }
+      }
+    });
+    
+    // Define table groupings
+    const moduleTables = {
+      setup: ['WhiteLabelConfig', 'AcademicSession', 'Term', 'Class', 'Section', 'MasterSubject', 'Subject'],
+      students: ['Student', 'Parent'],
+      finance: ['FeeCategory', 'FeeLedger', 'FeeReceipt', 'AccountTransaction'],
+      attendance: ['StudentAttendance'],
+      payroll: ['Employee', 'Payslip', 'LeaveRequest', 'EmployeeAttendance'],
+      exams: ['Exam', 'ExamSubject', 'QuestionPaper', 'Question', 'ExamDuty', 'ExamEvaluationDuty', 'ExamMark']
+    };
+    
+    // Temporarily turn off active database foreign key checks to allow bulk deletion and copy
+    await req.prisma.$executeRawUnsafe('PRAGMA foreign_keys = OFF;');
+    
+    // Copy selected tables' records from backup to active database
+    for (const [moduleKey, tables] of Object.entries(moduleTables)) {
+      if (selectedModules[moduleKey] === true) {
+        for (const table of tables) {
+          try {
+            // Read source rows
+            const rows = await backupPrisma.$queryRawUnsafe(`SELECT * FROM "${table}"`);
+            
+            // Delete target tables
+            await req.prisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
+            
+            if (rows.length > 0) {
+              const keys = Object.keys(rows[0]);
+              const columnsStr = keys.map(k => `"${k}"`).join(', ');
+              const placeholders = keys.map(() => '?').join(', ');
+              const insertSql = `INSERT INTO "${table}" (${columnsStr}) VALUES (${placeholders})`;
+              
+              for (const row of rows) {
+                const values = keys.map(k => {
+                  const val = row[k];
+                  if (val instanceof Date) {
+                    return val.toISOString();
+                  }
+                  return val;
+                });
+                await req.prisma.$executeRawUnsafe(insertSql, ...values);
+              }
+            }
+          } catch (e) {
+            console.error(`Error copying table ${table} during restore:`, e);
+          }
+        }
+      }
+    }
+    
+    // Re-enable active DB constraints
+    await req.prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON;');
+    
+    // Clean up temporary database connection and file
+    await backupPrisma.$disconnect();
+    try {
+      if (fs.existsSync(tempRestorePath)) {
+        fs.unlinkSync(tempRestorePath);
+      }
+    } catch (e) {
+      console.error("Error cleaning up temp restore file:", e);
+    }
+    
+    res.json({ success: true, message: "Selective backup restored successfully" });
+  } catch (error) {
+    console.error("Backup restore failed:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// SETUP & CONFIG ROUTES
+// ==========================================
+
+// Get School Setup
+app.get('/api/ping', (req, res) => res.send('pong123' + (req.headers['x-tenant-id'] || 'none')));
+app.get('/api/setup/school', async (req, res) => {
+  try {
+    let config = await req.prisma.whiteLabelConfig.findFirst();
+    if (!config) {
+      config = await req.prisma.whiteLabelConfig.create({
+        data: { schoolName: 'My School', themeColor: '#4F46E5' }
+      });
+    }
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update School Setup
+app.post('/api/setup/school', async (req, res) => {
+  try {
+    const data = req.body;
+    let config = await req.prisma.whiteLabelConfig.findFirst();
+    if (config) {
+      config = await req.prisma.whiteLabelConfig.update({
+        where: { id: config.id },
+        data
+      });
+    } else {
+      config = await req.prisma.whiteLabelConfig.create({ data });
+    }
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get Classes
+app.get('/api/setup/classes', async (req, res) => {
+  try {
+    const activeSession = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+    if (!activeSession) return res.json([]);
+    
+    const classes = await req.prisma.class.findMany({
+      where: { sessionId: activeSession.id },
+      include: { sections: true, subjects: true, nextClass: true },
+      orderBy: { orderIndex: 'asc' }
+    });
+    res.json(classes);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create Class
+app.post('/api/setup/classes', async (req, res) => {
+  try {
+    const { name, maxCapacity, orderIndex, sections, periodDuration } = req.body;
+    let session = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+    if (!session) {
+      session = await req.prisma.academicSession.create({ data: { name: 'Active Session', startDate: new Date(), endDate: new Date(), isActive: true } });
+    }
+
+    const newClass = await req.prisma.class.create({
+      data: {
+        name,
+        maxCapacity: parseInt(maxCapacity),
+        orderIndex: parseInt(orderIndex),
+        periodDuration: parseInt(periodDuration || 45),
+        sessionId: session.id,
+      }
+    });
+
+    if (sections && sections.length > 0) {
+      const sectionData = sections.map(secName => ({ name: secName, classId: newClass.id }));
+      await req.prisma.section.createMany({ data: sectionData });
+    }
+    
+    res.json(newClass);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update Class
+app.put('/api/setup/classes/:id', async (req, res) => {
+  try {
+    const { name, maxCapacity, orderIndex, sections, periodDuration } = req.body;
+    
+    // Update basic class details
+    const updatedClass = await req.prisma.class.update({
+      where: { id: req.params.id },
+      data: {
+        name,
+        maxCapacity: parseInt(maxCapacity),
+        orderIndex: parseInt(orderIndex),
+        periodDuration: parseInt(periodDuration || 45)
+      }
+    });
+
+    // Update sections (Replace completely for simplicity, or just add new ones)
+    if (sections) {
+      // Delete existing sections not in the list (this will also cascade delete students in those sections if any)
+      await req.prisma.section.deleteMany({
+        where: { classId: req.params.id, name: { notIn: sections } }
+      });
+      // Add missing sections
+      const existingSections = await req.prisma.section.findMany({ where: { classId: req.params.id } });
+      const existingNames = existingSections.map(s => s.name);
+      
+      const newSections = sections.filter(s => !existingNames.includes(s));
+      if (newSections.length > 0) {
+        await req.prisma.section.createMany({
+          data: newSections.map(secName => ({ name: secName, classId: req.params.id }))
+        });
+      }
+    }
+
+    res.json(updatedClass);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete Class (Cascade deletes handled by DB constraints)
+app.delete('/api/setup/classes/:id', async (req, res) => {
+  try {
+    await req.prisma.class.delete({
+      where: { id: req.params.id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get Sessions
+app.get('/api/setup/sessions', async (req, res) => {
+  try {
+    const sessions = await req.prisma.academicSession.findMany({
+      orderBy: { startDate: 'desc' }
+    });
+    res.json(sessions);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create Session
+app.post('/api/setup/sessions', async (req, res) => {
+  try {
+    const { name, startDate, endDate, makeActive } = req.body;
+    
+    // If we want this to be active, deactivate all others
+    if (makeActive) {
+      await req.prisma.academicSession.updateMany({
+        where: { isActive: true },
+        data: { isActive: false }
+      });
+    }
+
+    const newSession = await req.prisma.academicSession.create({
+      data: {
+        name,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        isActive: makeActive || false
+      }
+    });
+    
+    res.json(newSession);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update Session
+app.put('/api/setup/sessions/:id', async (req, res) => {
+  try {
+    const { name, startDate, endDate, makeActive } = req.body;
+    
+    if (makeActive) {
+      await req.prisma.academicSession.updateMany({
+        where: { id: { not: req.params.id } },
+        data: { isActive: false }
+      });
+    }
+
+    const updatedSession = await req.prisma.academicSession.update({
+      where: { id: req.params.id },
+      data: {
+        name,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        isActive: makeActive || false
+      }
+    });
+    
+    res.json(updatedSession);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete Session
+app.delete('/api/setup/sessions/:id', async (req, res) => {
+  try {
+    await req.prisma.academicSession.delete({
+      where: { id: req.params.id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// MASTER SUBJECTS ENDPOINTS
+// ==========================================
+
+// Get Master Subjects
+app.get('/api/setup/master-subjects', async (req, res) => {
+  try {
+    const activeSession = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+    const masterSubjects = await req.prisma.masterSubject.findMany({
+      where: activeSession ? { sessionId: activeSession.id } : {}
+    });
+    res.json(masterSubjects);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create Master Subject
+app.post('/api/setup/master-subjects', async (req, res) => {
+  try {
+    const { name, code } = req.body;
+    
+    const activeSession = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+    
+    const newMaster = await req.prisma.masterSubject.create({
+      data: { 
+        name, 
+        code,
+        ...(activeSession ? { sessionId: activeSession.id } : {})
+      }
+    });
+    res.json(newMaster);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update Master Subject
+app.put('/api/setup/master-subjects/:id', async (req, res) => {
+  try {
+    const { name, code } = req.body;
+    const updatedMaster = await req.prisma.masterSubject.update({
+      where: { id: req.params.id },
+      data: { name, code }
+    });
+    res.json(updatedMaster);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete Master Subject
+app.delete('/api/setup/master-subjects/:id', async (req, res) => {
+  try {
+    await req.prisma.masterSubject.delete({
+      where: { id: req.params.id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// SUBJECTS ASSIGNMENTS ENDPOINTS
+// ==========================================
+
+// Get Subjects
+app.get('/api/setup/subjects', async (req, res) => {
+  try {
+    const activeSession = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+    if (!activeSession) return res.json([]);
+
+    const subjects = await req.prisma.subject.findMany({
+      where: { class: { sessionId: activeSession.id } },
+      include: { class: true, section: true, masterSubject: true, teacher: true }
+    });
+    res.json(subjects);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create Subject
+app.post('/api/setup/subjects', async (req, res) => {
+  try {
+    const { masterSubjectId, classId, sectionId, isOptional, teacherId, startTime, endTime, daysOfWeek } = req.body;
+    const newSubject = await req.prisma.subject.create({
+      data: {
+        masterSubjectId,
+        classId,
+        sectionId: sectionId || null,
+        isOptional: !!isOptional,
+        teacherId: teacherId || null,
+        startTime: startTime || null,
+        endTime: endTime || null,
+        daysOfWeek: daysOfWeek || []
+      },
+      include: { class: true, section: true, masterSubject: true, teacher: true }
+    });
+    res.json(newSubject);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update Subject
+app.put('/api/setup/subjects/:id', async (req, res) => {
+  try {
+    const { masterSubjectId, classId, sectionId, isOptional, teacherId, startTime, endTime, daysOfWeek } = req.body;
+    const updatedSubject = await req.prisma.subject.update({
+      where: { id: req.params.id },
+      data: {
+        masterSubjectId,
+        classId,
+        sectionId: sectionId || null,
+        isOptional: !!isOptional,
+        teacherId: teacherId || null,
+        startTime: startTime || null,
+        endTime: endTime || null,
+        daysOfWeek: daysOfWeek || null
+      },
+      include: { class: true, section: true, masterSubject: true, teacher: true }
+    });
+    res.json(updatedSubject);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete Subject
+app.delete('/api/setup/subjects/:id', async (req, res) => {
+  try {
+    await req.prisma.subject.delete({
+      where: { id: req.params.id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// HR / EMPLOYEES ENDPOINTS
+// ==========================================
+app.get('/api/hr/employees', async (req, res) => {
+  try {
+    const activeSession = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+    if (!activeSession) return res.json([]);
+    
+    const employees = await req.prisma.employee.findMany({
+      where: { sessions: { some: { sessionId: activeSession.id } } }
+    });
+    res.json(employees);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/hr/employees', async (req, res) => {
+  try {
+    const data = req.body;
+    if (data.id === null || data.id === undefined) {
+      delete data.id;
+    }
+    data.joinDate = new Date(data.joinDate);
+    data.dob = new Date(data.dob);
+    data.baseSalary = parseFloat(data.baseSalary || 0);
+    const newEmp = await req.prisma.employee.create({ data });
+    
+    const activeSession = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+    if (activeSession) {
+      await req.prisma.employeeSession.create({
+        data: {
+          employeeId: newEmp.id,
+          sessionId: activeSession.id,
+          status: 'Active'
+        }
+      });
+    }
+    
+    res.json(newEmp);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/hr/employees/:id', async (req, res) => {
+  try {
+    const data = req.body;
+    delete data.id; // remove id before update so it doesn't try to change it or fail
+    data.joinDate = new Date(data.joinDate);
+    data.dob = new Date(data.dob);
+    data.baseSalary = parseFloat(data.baseSalary || 0);
+    const updatedEmp = await req.prisma.employee.update({
+      where: { id: req.params.id },
+      data
+    });
+    res.json(updatedEmp);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/hr/employees/:id', async (req, res) => {
+  try {
+    await req.prisma.employee.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// PAYROLL / SALARY MANAGEMENT ENDPOINTS
+// ==========================================
+app.get('/api/payroll/payslips', async (req, res) => {
+  try {
+    const month = parseInt(req.query.month);
+    const year = parseInt(req.query.year);
+    const payslips = await req.prisma.payslip.findMany({
+      where: { month, year },
+      include: { employee: true }
+    });
+    res.json(payslips);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/payroll/payslips/generate', async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    const mVal = parseInt(month);
+    const yVal = parseInt(year);
+    if (isNaN(mVal) || isNaN(yVal)) {
+      return res.status(400).json({ error: 'Invalid month or year' });
+    }
+
+    const employees = await req.prisma.employee.findMany();
+    const generated = [];
+
+    for (const emp of employees) {
+      // Find if payslip already exists
+      const existing = await req.prisma.payslip.findUnique({
+        where: {
+          employeeId_month_year: {
+            employeeId: emp.id,
+            month: mVal,
+            year: yVal
+          }
+        }
+      });
+
+      if (!existing) {
+        const newSlip = await req.prisma.payslip.create({
+          data: {
+            employeeId: emp.id,
+            month: mVal,
+            year: yVal,
+            basicPay: emp.baseSalary || 0,
+            allowances: 0,
+            deductions: 0,
+            netPay: emp.baseSalary || 0,
+            status: 'Generated'
+          }
+        });
+        generated.push(newSlip);
+      }
+    }
+    res.json({ success: true, count: generated.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/payroll/payslips/:id', async (req, res) => {
+  try {
+    const { basicPay, allowances, deductions, netPay, status } = req.body;
+    const updated = await req.prisma.payslip.update({
+      where: { id: req.params.id },
+      data: {
+        basicPay: parseFloat(basicPay ?? 0),
+        allowances: parseFloat(allowances ?? 0),
+        deductions: parseFloat(deductions ?? 0),
+        netPay: parseFloat(netPay ?? 0),
+        status: status
+      }
+    });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/payroll/payslips/pay-all', async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    const mVal = parseInt(month);
+    const yVal = parseInt(year);
+    if (isNaN(mVal) || isNaN(yVal)) {
+      return res.status(400).json({ error: 'Invalid month or year' });
+    }
+
+    const updated = await req.prisma.payslip.updateMany({
+      where: { month: mVal, year: yVal, status: 'Generated' },
+      data: { status: 'Paid' }
+    });
+    res.json({ success: true, count: updated.count });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// FINANCE / FEE CATEGORIES ENDPOINTS
+// ==========================================
+app.get('/api/finance/fee-categories', async (req, res) => {
+  try {
+    const categories = await req.prisma.feeCategory.findMany();
+    res.json(categories);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/finance/fee-categories', async (req, res) => {
+  try {
+    const { name, amount, frequency, classIds } = req.body;
+    const newCat = await req.prisma.feeCategory.create({
+      data: { name, amount: parseFloat(amount), frequency, classIds }
+    });
+    res.json(newCat);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/finance/fee-categories/:id', async (req, res) => {
+  try {
+    const { name, amount, frequency, classIds } = req.body;
+    const updatedCat = await req.prisma.feeCategory.update({
+      where: { id: req.params.id },
+      data: { name, amount: parseFloat(amount), frequency, classIds }
+    });
+    res.json(updatedCat);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/finance/fee-categories/bulk', async (req, res) => {
+  try {
+    const { categories } = req.body;
+    const results = [];
+    for (const cat of categories) {
+      if (cat.id) {
+        const u = await req.prisma.feeCategory.update({
+          where: { id: cat.id },
+          data: {
+            name: cat.name,
+            amount: parseFloat(cat.amount),
+            frequency: cat.frequency,
+            classIds: cat.classIds
+          }
+        });
+        results.push(u);
+      } else {
+        const c = await req.prisma.feeCategory.create({
+          data: {
+            name: cat.name,
+            amount: parseFloat(cat.amount),
+            frequency: cat.frequency,
+            classIds: cat.classIds
+          }
+        });
+        results.push(c);
+      }
+    }
+    res.json({ success: true, count: results.length, data: results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/finance/fee-categories/:id', async (req, res) => {
+  try {
+    await req.prisma.feeCategory.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// STUDENTS / ADMISSION ENDPOINTS
+// ==========================================
+// Students endpoint handled at the top
+
+app.post('/api/students/admission', async (req, res) => {
+  try {
+    const { 
+      admissionNumber, enrollmentNumber, firstName, lastName, dob, gender, 
+      admissionDate, classId, sectionId, mobileNumber,
+      fatherName, motherName, primaryPhone, sessionId
+    } = req.body;
+
+    const parentRecord = await req.prisma.parent.create({
+      data: { fatherName, motherName, primaryPhone }
+    });
+
+    const newStudent = await req.prisma.student.create({
+      data: {
+        admissionNumber, 
+        enrollmentNumber: enrollmentNumber || null,
+        firstName, lastName, gender, mobileNumber,
+        dob: new Date(dob),
+        admissionDate: new Date(admissionDate),
+        parentId: parentRecord.id
+      }
+    });
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    const enrollment = await req.prisma.studentSession.create({
+      data: {
+        studentId: newStudent.id,
+        sessionId: targetSessionId,
+        classId,
+        sectionId,
+        status: 'Active'
+      },
+      include: { student: { include: { parent: true } }, class: true, section: true }
+    });
+
+    res.json({
+      ...enrollment.student,
+      classId: enrollment.classId,
+      sectionId: enrollment.sectionId,
+      class: enrollment.class,
+      section: enrollment.section,
+      sessionId: enrollment.sessionId
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/students/:id', async (req, res) => {
+  try {
+    const { 
+      admissionNumber, enrollmentNumber, firstName, lastName, dob, gender, 
+      admissionDate, classId, sectionId, mobileNumber,
+      fatherName, motherName, primaryPhone, sessionId 
+    } = req.body;
+
+    const student = await req.prisma.student.findUnique({ where: { id: req.params.id } });
+    let parentId = student.parentId;
+
+    if (parentId) {
+      await req.prisma.parent.update({
+        where: { id: parentId },
+        data: { fatherName, motherName, primaryPhone }
+      });
+    } else {
+      const parentRecord = await req.prisma.parent.create({
+        data: { fatherName, motherName, primaryPhone }
+      });
+      parentId = parentRecord.id;
+    }
+
+    const updatedStudent = await req.prisma.student.update({
+      where: { id: req.params.id },
+      data: {
+        admissionNumber, 
+        enrollmentNumber: enrollmentNumber || null,
+        firstName, lastName, gender, mobileNumber,
+        dob: new Date(dob),
+        admissionDate: new Date(admissionDate),
+        parentId
+      }
+    });
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    let enrollment = await req.prisma.studentSession.findFirst({
+      where: { studentId: req.params.id, sessionId: targetSessionId }
+    });
+
+    if (enrollment) {
+      enrollment = await req.prisma.studentSession.update({
+        where: { id: enrollment.id },
+        data: { classId, sectionId },
+        include: { student: { include: { parent: true } }, class: true, section: true }
+      });
+    }
+
+    res.json({
+      ...updatedStudent,
+      parent: { fatherName, motherName, primaryPhone },
+      classId: enrollment ? enrollment.classId : classId,
+      sectionId: enrollment ? enrollment.sectionId : sectionId,
+      sessionId: targetSessionId
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/students/:id', async (req, res) => {
+  try {
+    await req.prisma.student.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// PROMOTION ENDPOINTS
+// ==========================================
+app.post('/api/students/promote', async (req, res) => {
+  try {
+    const { targetSessionId, students } = req.body;
+    // students: array of { studentId, action, targetClassId, targetSectionId, newRollNumber }
+    
+    if (!targetSessionId || !students || students.length === 0) {
+      return res.status(400).json({ error: 'targetSessionId and students array are required' });
+    }
+
+    const operations = [];
+
+    for (const stu of students) {
+      if (stu.action === 'Promote' || stu.action === 'Retain') {
+        if (!stu.targetClassId || !stu.targetSectionId) {
+          return res.status(400).json({ error: `targetClassId and targetSectionId required for ${stu.action}` });
+        }
+        
+        // Upsert to handle multiple runs safely
+        operations.push(
+          req.prisma.studentSession.upsert({
+            where: {
+              studentId_sessionId: {
+                studentId: stu.studentId,
+                sessionId: targetSessionId
+              }
+            },
+            update: {
+              classId: stu.targetClassId,
+              sectionId: stu.targetSectionId,
+              rollNumber: stu.newRollNumber || null,
+              status: 'Active'
+            },
+            create: {
+              studentId: stu.studentId,
+              sessionId: targetSessionId,
+              classId: stu.targetClassId,
+              sectionId: stu.targetSectionId,
+              rollNumber: stu.newRollNumber || null,
+              status: 'Active'
+            }
+          })
+        );
+      } else if (stu.action === 'Leave') {
+        // Just update global student status or record they left in current session
+        // Here we'll just update the latest studentSession to 'Left' or 'Graduated'
+        // For simplicity, we can update the global Student status if needed, 
+        // but since we rely on StudentSession, we'll just not create a new one.
+      }
+    }
+
+    if (operations.length > 0) {
+      await req.prisma.$transaction(operations);
+    }
+
+    res.json({ success: true, promotedCount: operations.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// ATTENDANCE ENDPOINTS
+// ==========================================
+app.get('/api/attendance/students', async (req, res) => {
+  try {
+    const { classId, sectionId, date, sessionId } = req.query;
+    if (!classId || !sectionId || !date) {
+      return res.status(400).json({ error: 'classId, sectionId, and date are required' });
+    }
+
+    const targetDate = new Date(date);
+    targetDate.setUTCHours(0,0,0,0);
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    const enrollments = await req.prisma.studentSession.findMany({
+      where: { classId, sectionId, sessionId: targetSessionId, status: 'Active' },
+      include: { student: true }
+    });
+
+    const students = enrollments.map(e => e.student).sort((a,b) => a.firstName.localeCompare(b.firstName));
+
+    const attendances = await req.prisma.studentAttendance.findMany({
+      where: {
+        studentId: { in: students.map(s => s.id) },
+        sessionId: targetSessionId,
+        date: {
+          gte: targetDate,
+          lt: new Date(targetDate.getTime() + 24 * 60 * 60 * 1000)
+        }
+      }
+    });
+
+    const result = students.map(student => {
+      const attendance = attendances.find(a => a.studentId === student.id);
+      return {
+        student,
+        status: attendance ? attendance.status : 'Present',
+        remarks: attendance ? attendance.remarks : ''
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET Class-wise Attendance Summary for a specific date
+app.get('/api/attendance/summary', async (req, res) => {
+  try {
+    const { date, sessionId } = req.query;
+    if (!date) {
+      return res.status(400).json({ error: 'date query parameter is required' });
+    }
+
+    const targetDate = new Date(date);
+    targetDate.setUTCHours(0,0,0,0);
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    // Fetch classes, sections, teachers and active students
+    const classes = await req.prisma.class.findMany({
+      where: { sessionId: targetSessionId },
+      include: {
+        sections: {
+          include: {
+            teacher: true,
+            studentSessions: {
+              where: { status: 'Active', sessionId: targetSessionId },
+              include: { student: true }
+            }
+          }
+        }
+      },
+      orderBy: { orderIndex: 'asc' }
+    });
+
+    const summary = [];
+
+    for (const cls of classes) {
+      for (const sec of cls.sections) {
+        const studentIds = sec.studentSessions.map(s => s.studentId);
+        let attendances = [];
+
+        if (studentIds.length > 0) {
+          attendances = await req.prisma.studentAttendance.findMany({
+            where: {
+              studentId: { in: studentIds },
+              sessionId: targetSessionId,
+              date: {
+                gte: targetDate,
+                lt: new Date(targetDate.getTime() + 24 * 60 * 60 * 1000)
+              }
+            }
+          });
+        }
+
+        const present = attendances.filter(a => a.status === 'Present').length;
+        const absent = attendances.filter(a => a.status === 'Absent').length;
+        const late = attendances.filter(a => a.status === 'Late').length;
+        const halfDay = attendances.filter(a => a.status === 'HalfDay').length;
+        const totalStrength = sec.studentSessions.length;
+        
+        // Mark status: True if we have at least one record for any student in this section on this date
+        const isMarked = studentIds.length > 0 && attendances.length > 0;
+
+        summary.push({
+          classId: cls.id,
+          className: cls.name,
+          sectionId: sec.id,
+          sectionName: sec.name,
+          teacherName: sec.teacher ? `${sec.teacher.firstName} ${sec.teacher.lastName}` : 'Not Assigned',
+          totalStudents: totalStrength,
+          present,
+          absent,
+          late,
+          halfDay,
+          isMarked
+        });
+      }
+    }
+
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET Month-wide Attendance Summary for a specific Class + Section
+app.get('/api/attendance/monthly-summary', async (req, res) => {
+  try {
+    const { classId, sectionId, year, month, sessionId } = req.query;
+    if (!classId || !sectionId || !year || !month) {
+      return res.status(400).json({ error: 'classId, sectionId, year, and month are required' });
+    }
+
+    const y = parseInt(year);
+    const m = parseInt(month); // 1-indexed (1 = Jan, 12 = Dec)
+
+    const startDate = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
+    const endDate = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0));
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    const enrollments = await req.prisma.studentSession.findMany({
+      where: { classId, sectionId, sessionId: targetSessionId, status: 'Active' }
+    });
+    const studentIds = enrollments.map(s => s.studentId);
+
+    const attendances = studentIds.length > 0 
+      ? await req.prisma.studentAttendance.findMany({
+          where: {
+            studentId: { in: studentIds },
+            sessionId: targetSessionId,
+            date: {
+              gte: startDate,
+              lt: endDate
+            }
+          }
+        })
+      : [];
+
+    const grouped = {};
+    attendances.forEach(a => {
+      const dStr = a.date.toISOString().split('T')[0];
+      if (!grouped[dStr]) {
+        grouped[dStr] = { present: 0, absent: 0, late: 0, halfDay: 0, count: 0 };
+      }
+      if (a.status === 'Present') grouped[dStr].present++;
+      else if (a.status === 'Absent') grouped[dStr].absent++;
+      else if (a.status === 'Late') grouped[dStr].late++;
+      else if (a.status === 'HalfDay') grouped[dStr].halfDay++;
+      grouped[dStr].count++;
+    });
+
+    res.json({
+      totalStudents: enrollments.length,
+      attendanceByDate: grouped
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+app.post('/api/attendance/students', async (req, res) => {
+  try {
+    const { date, records, sessionId } = req.body;
+    // records: [{ studentId, status, remarks }]
+    
+    const targetDate = new Date(date);
+    targetDate.setUTCHours(0,0,0,0);
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    // Upsert each record
+    const operations = records.map(record => {
+      return req.prisma.studentAttendance.upsert({
+        where: {
+          studentId_sessionId_date: {
+            studentId: record.studentId,
+            sessionId: targetSessionId,
+            date: targetDate
+          }
+        },
+        update: {
+          status: record.status,
+          remarks: record.remarks || ''
+        },
+        create: {
+          studentId: record.studentId,
+          sessionId: targetSessionId,
+          date: targetDate,
+          status: record.status,
+          remarks: record.remarks || ''
+        }
+      });
+    });
+
+    await req.prisma.$transaction(operations);
+    res.json({ success: true, count: operations.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// FINANCE & FEE COLLECTION ENDPOINTS
+// ==========================================
+
+// Get all ledgers for a student
+app.get('/api/finance/ledgers', async (req, res) => {
+  try {
+    const { studentId } = req.query;
+    let whereClause = {};
+    if (studentId) whereClause.studentId = studentId;
+
+    const ledgers = await req.prisma.feeLedger.findMany({
+      where: whereClause,
+      include: { 
+        category: true, 
+        receipts: true
+      },
+      orderBy: { dueDate: 'asc' }
+    });
+    res.json(ledgers);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generate new fee ledger (invoice) for a student
+app.post('/api/finance/ledgers', async (req, res) => {
+  try {
+    const { studentId, feeCategoryId, dueDate, amountDue, sessionId } = req.body;
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    const ledger = await req.prisma.feeLedger.create({
+      data: {
+        studentId,
+        sessionId: targetSessionId,
+        feeCategoryId,
+        dueDate: new Date(dueDate),
+        amountDue: parseFloat(amountDue),
+        amountPaid: 0,
+        status: 'Unpaid'
+      },
+      include: { category: true }
+    });
+    res.json(ledger);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk generate bills for a class
+app.post('/api/finance/ledgers/generate', async (req, res) => {
+  try {
+    const { classId, feeCategoryId, dueDate, amountDue, sessionId } = req.body;
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+    
+    const enrollments = await req.prisma.studentSession.findMany({ where: { classId, sessionId: targetSessionId, status: 'Active' } });
+    
+    const ledgers = [];
+    for (const stu of enrollments) {
+      const ledger = await req.prisma.feeLedger.create({
+        data: {
+          studentId: stu.studentId,
+          sessionId: targetSessionId,
+          feeCategoryId,
+          dueDate: new Date(dueDate),
+          amountDue: parseFloat(amountDue),
+          amountPaid: 0,
+          status: 'Unpaid'
+        }
+      });
+      ledgers.push(ledger);
+    }
+    
+    res.json({ success: true, generatedCount: ledgers.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Record a payment (receipt)
+app.post('/api/finance/receipts', async (req, res) => {
+  try {
+    const { ledgerId, amount, paymentMode, transactionNumber, paymentDate } = req.body;
+    const paymentAmount = parseFloat(amount);
+    
+    const ledger = await req.prisma.feeLedger.findUnique({ where: { id: ledgerId } });
+    if (!ledger) return res.status(404).json({ error: 'Ledger not found' });
+    
+    const newPaidAmount = ledger.amountPaid + paymentAmount;
+    let status = 'Partial';
+    if (newPaidAmount >= ledger.amountDue) status = 'Paid';
+    
+    // Build payment mode string (include txn number if online)
+    const fullPaymentMode = transactionNumber 
+      ? `${paymentMode} | TXN: ${transactionNumber}` 
+      : paymentMode;
+    
+    // Create receipt and update ledger atomically
+    const [receipt, updatedLedger] = await req.prisma.$transaction([
+      req.prisma.feeReceipt.create({
+        data: {
+          receiptNumber: `REC-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          ledgerId,
+          amount: paymentAmount,
+          paymentMode: fullPaymentMode,
+          paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+        }
+      }),
+      req.prisma.feeLedger.update({
+        where: { id: ledgerId },
+        data: { amountPaid: newPaidAmount, status },
+        include: { category: true, receipts: true }
+      })
+    ]);
+    
+    res.json(updatedLedger);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// ==========================================
+// EXAMS & MARKS ENDPOINTS
+// ==========================================
+app.get('/api/exams/dashboard', async (req, res) => {
+  try {
+    const { sessionId } = req.query;
+    if (!sessionId) return res.status(400).json({ error: "sessionId required" });
+
+    const allMarks = await req.prisma.studentMark.findMany({
+      where: { examSubject: { exam: { term: { sessionId } } } },
+      include: { examSubject: { include: { exam: { include: { term: true } } } } }
+    });
+
+    let totalObtained = 0;
+    let totalMax = 0;
+    const examMap = {};
+
+    allMarks.forEach(m => {
+      totalObtained += m.obtainedMarks;
+      totalMax += m.examSubject.maxMarks;
+      
+      const examName = m.examSubject.exam.name;
+      if (!examMap[examName]) {
+        examMap[examName] = { obtained: 0, max: 0, termName: m.examSubject.exam.term.name };
+      }
+      examMap[examName].obtained += m.obtainedMarks;
+      examMap[examName].max += m.examSubject.maxMarks;
+    });
+
+    const schoolAvg = totalMax > 0 ? parseFloat(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
+    const examTrends = Object.keys(examMap).map(examName => {
+      const data = examMap[examName];
+      return {
+        name: examName,
+        term: data.termName,
+        avg: data.max > 0 ? parseFloat(((data.obtained / data.max) * 100).toFixed(1)) : 0
+      };
+    });
+
+    const exams = await req.prisma.exam.findMany({
+      where: { term: { sessionId } },
+      include: { subjects: { include: { marks: true } } }
+    });
+    
+    const missingMarksAlerts = [];
+    exams.forEach(ex => {
+      if (new Date(ex.endDate) < new Date()) {
+        let hasMarks = false;
+        ex.subjects.forEach(sub => {
+          if (sub.marks.length > 0) hasMarks = true;
+        });
+        if (!hasMarks && ex.subjects.length > 0) {
+          missingMarksAlerts.push(`Marks pending for completed exam: ${ex.name}`);
+        }
+      }
+    });
+
+    res.json({
+      schoolAverage: schoolAvg,
+      examTrends,
+      missingMarksAlerts
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+app.get('/api/exams', async (req, res) => {
+  try {
+    const exams = await req.prisma.exam.findMany({
+      include: {
+        term: true,
+        subjects: {
+          include: { 
+            subject: true,
+            questionPaper: true,
+            duties: { include: { teacher: true } },
+            evaluations: { include: { evaluator: true } }
+          }
+        }
+      }
+    });
+    res.json(exams);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/exams', async (req, res) => {
+  try {
+    const { name, termId, startDate, endDate } = req.body;
+    const exam = await req.prisma.exam.create({
+      data: {
+        name,
+        termId,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate)
+      }
+    });
+    res.json(exam);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/exams/marks', async (req, res) => {
+  try {
+    const { examSubjectId, marks } = req.body;
+    // marks is an array: [{ studentId, marksObtained, remarks }]
+    
+    const operations = marks.map(m => {
+      return req.prisma.examMark.upsert({
+        where: {
+          examSubjectId_studentId: {
+            examSubjectId,
+            studentId: m.studentId
+          }
+        },
+        update: {
+          marksObtained: parseFloat(m.marksObtained),
+          remarks: m.remarks
+        },
+        create: {
+          examSubjectId,
+          studentId: m.studentId,
+          marksObtained: parseFloat(m.marksObtained),
+          remarks: m.remarks
+        }
+      });
+    });
+
+    await req.prisma.$transaction(operations);
+    res.json({ success: true, count: operations.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Configure multiple subjects for an exam at once
+app.post('/api/exams/:examId/subjects', async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const { subjects } = req.body; // Array of { subjectId, examDate, maxMarks, passMarks }
+    
+    const operations = subjects.map(s => {
+      return req.prisma.examSubject.upsert({
+        where: { id: s.id || 'new_id' }, // Or delete existing and recreate
+        update: {
+          examDate: new Date(s.examDate),
+          maxMarks: parseFloat(s.maxMarks),
+          passMarks: parseFloat(s.passMarks)
+        },
+        create: {
+          examId,
+          subjectId: s.subjectId,
+          examDate: new Date(s.examDate),
+          maxMarks: parseFloat(s.maxMarks),
+          passMarks: parseFloat(s.passMarks)
+        }
+      });
+    });
+
+    // Alternatively, just delete existing mappings for this exam+class and recreate? 
+    // To keep it simple, let's just clear existing mappings for the subjects being passed and recreate.
+    await req.prisma.examSubject.deleteMany({
+      where: { 
+        examId, 
+        subjectId: { in: subjects.map(s => s.subjectId) } 
+      }
+    });
+
+    const newSubjects = await req.prisma.examSubject.createMany({
+      data: subjects.map(s => ({
+        examId,
+        subjectId: s.subjectId,
+        examDate: new Date(s.examDate),
+        maxMarks: parseFloat(s.maxMarks),
+        passMarks: parseFloat(s.passMarks),
+        mode: s.mode || 'OFFLINE',
+        paperType: s.paperType || 'SUBJECTIVE',
+        durationMins: s.durationMins ? parseInt(s.durationMins) : 120
+      }))
+    });
+
+    res.json(newSubjects);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/exam-subjects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { mode, paperType, durationMins } = req.body;
+    
+    const updated = await req.prisma.examSubject.update({
+      where: { id },
+      data: {
+        ...(mode && { mode }),
+        ...(paperType && { paperType }),
+        ...(durationMins && { durationMins: parseInt(durationMins) })
+      }
+    });
+    
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update or set Invigilation Duty
+app.post('/api/exam-subjects/:id/duties', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { teacherId } = req.body;
+    
+    // In a real app, you might support multiple duties. For now, clear and set one.
+    await req.prisma.examDuty.deleteMany({ where: { examSubjectId: id } });
+    if (teacherId) {
+      const es = await req.prisma.examSubject.findUnique({ where: { id } });
+      await req.prisma.examDuty.create({
+        data: { 
+          examSubjectId: id, 
+          teacherId,
+          dutyDate: es?.examDate || new Date(),
+          startTime: new Date(),
+          endTime: new Date()
+        }
+      });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update or set Evaluation Duty
+app.post('/api/exam-subjects/:id/evaluations', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { evaluatorId, status } = req.body; // status: PENDING, IN_PROGRESS, COMPLETED
+    
+    await req.prisma.examEvaluationDuty.deleteMany({ where: { examSubjectId: id } });
+    if (evaluatorId) {
+      await req.prisma.examEvaluationDuty.create({
+        data: { examSubjectId: id, evaluatorId, status: status || 'PENDING' }
+      });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET Question Paper
+app.get('/api/exam-subjects/:id/question-paper', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const examSubject = await req.prisma.examSubject.findUnique({
+      where: { id },
+      include: {
+        questionPaper: {
+          include: {
+            questions: {
+              orderBy: { orderIndex: 'asc' }
+            }
+          }
+        }
+      }
+    });
+    
+    if (!examSubject) {
+      return res.status(404).json({ error: 'Exam subject not found' });
+    }
+    
+    res.json(examSubject.questionPaper || null);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST Question Paper (Create or Update)
+app.post('/api/exam-subjects/:id/question-paper', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, totalMarks, isDigital, fileUrl, questions } = req.body;
+    
+    // Check if QuestionPaper exists for this exam subject
+    const examSubject = await req.prisma.examSubject.findUnique({
+      where: { id },
+      include: { questionPaper: true }
+    });
+    
+    if (!examSubject) {
+      return res.status(404).json({ error: 'Exam subject not found' });
+    }
+
+    let questionPaperId = examSubject.questionPaperId;
+
+    if (!questionPaperId) {
+      // Create new Question Paper
+      const newQP = await req.prisma.questionPaper.create({
+        data: {
+          title: title || 'Untitled Paper',
+          totalMarks: totalMarks || 0,
+          isDigital: isDigital !== undefined ? isDigital : true,
+          fileUrl: fileUrl || ''
+        }
+      });
+      questionPaperId = newQP.id;
+      
+      // Link it to ExamSubject
+      await req.prisma.examSubject.update({
+        where: { id },
+        data: { questionPaperId }
+      });
+    } else {
+      // Update existing Question Paper
+      await req.prisma.questionPaper.update({
+        where: { id: questionPaperId },
+        data: {
+          title: title || 'Untitled Paper',
+          totalMarks: totalMarks || 0,
+          isDigital: isDigital !== undefined ? isDigital : true,
+          fileUrl: fileUrl || ''
+        }
+      });
+      // Delete old questions to replace them entirely
+      await req.prisma.question.deleteMany({
+        where: { questionPaperId }
+      });
+    }
+
+    // Insert new questions
+    if (questions && questions.length > 0) {
+      const questionsData = questions.map((q, index) => ({
+        questionPaperId,
+        type: q.type || 'SUBJECTIVE',
+        text: q.text || '',
+        marks: parseFloat(q.marks) || 0,
+        options: q.options ? JSON.stringify(q.options) : null,
+        correctAnswer: q.correctAnswer || null,
+        imageUrl: q.imageUrl || null,
+        isRequired: q.isRequired || false,
+        orderIndex: index
+      }));
+      
+      await req.prisma.question.createMany({
+        data: questionsData
+      });
+    }
+
+    // Return the created/updated paper
+    const updatedQP = await req.prisma.questionPaper.findUnique({
+      where: { id: questionPaperId },
+      include: { questions: { orderBy: { orderIndex: 'asc' } } }
+    });
+
+    res.json(updatedQP);
+  } catch (error) {
+    console.error('Error saving question paper:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get marks grid for an Exam, Class, Section
+app.get('/api/exams/marks/grid', async (req, res) => {
+  try {
+    const { examId, classId, sectionId, sessionId } = req.query;
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    // 1. Get all students in this class/section
+    const enrollments = await req.prisma.studentSession.findMany({
+      where: { classId, sectionId, sessionId: targetSessionId, status: 'Active' },
+      include: { student: { select: { id: true, firstName: true, lastName: true, admissionNumber: true } } }
+    });
+    
+    const students = enrollments.map(e => ({
+       id: e.student.id,
+       firstName: e.student.firstName,
+       lastName: e.student.lastName,
+       admissionNumber: e.student.admissionNumber,
+       rollNumber: e.rollNumber
+    }));
+
+    // 2. Get all ExamSubjects for this exam and class
+    const examSubjects = await req.prisma.examSubject.findMany({
+      where: {
+        examId,
+        subject: { classId }
+      },
+      include: {
+        subject: { include: { masterSubject: true } }
+      }
+    });
+
+    // 3. Get existing marks
+    const examSubjectIds = examSubjects.map(es => es.id);
+    const marks = await req.prisma.examMark.findMany({
+      where: {
+        examSubjectId: { in: examSubjectIds },
+        studentId: { in: students.map(s => s.id) }
+      }
+    });
+
+    res.json({ students, examSubjects, marks });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get comprehensive Report Card data for a student
+app.get('/api/exams/report/:studentId', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { sessionId } = req.query;
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const active = await req.prisma.academicSession.findFirst({ where: { isActive: true } });
+      targetSessionId = active ? active.id : null;
+    }
+
+    // Get student info with class/section
+    const enrollment = await req.prisma.studentSession.findUnique({
+      where: { studentId_sessionId: { studentId, sessionId: targetSessionId } },
+      include: { student: true, class: true, section: true }
+    });
+
+    if (!enrollment) return res.status(404).json({ error: 'Student not found in session' });
+
+    const student = { ...enrollment.student, class: enrollment.class, section: enrollment.section, rollNumber: enrollment.rollNumber };
+
+    // Get all marks for this student across all exams in the session
+    const marks = await req.prisma.examMark.findMany({
+      where: { 
+        studentId,
+        examSubject: {
+          exam: {
+            term: { sessionId: targetSessionId }
+          }
+        }
+      },
+      include: {
+        examSubject: {
+          include: {
+            exam: { include: { term: true } },
+            subject: { include: { masterSubject: true } }
+          }
+        }
+      }
+    });
+
+    res.json({ student, marks });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/setup/terms', async (req, res) => {
+  try {
+    const terms = await req.prisma.term.findMany();
+    res.json(terms);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/setup/terms', async (req, res) => {
+  try {
+    const { name, sessionId, months } = req.body;
+    const term = await req.prisma.term.create({
+      data: { 
+        name, 
+        sessionId,
+        months: months ? JSON.stringify(months) : null
+      }
+    });
+    res.json(term);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/setup/terms/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, months } = req.body;
+    const term = await req.prisma.term.update({
+      where: { id },
+      data: {
+        name,
+        months: months ? JSON.stringify(months) : null
+      }
+    });
+    res.json(term);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/setup/terms/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Ensure no exams are tied to this term
+    const examCount = await req.prisma.exam.count({ where: { termId: id } });
+    if (examCount > 0) {
+      return res.status(400).json({ error: "Cannot delete term as exams are still assigned to it." });
+    }
+
+    await req.prisma.term.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// PARENT DIRECTORY ENDPOINTS
+// ==========================================
+app.get('/api/parents', async (req, res) => {
+  try {
+    const parents = await req.prisma.parent.findMany({
+      include: {
+        students: {
+          include: { 
+            enrollments: {
+              where: { status: 'Active' },
+              include: { class: true, section: true }
+            }
+          }
+        }
+      }
+    });
+    const formattedParents = parents.map(p => ({
+      ...p,
+      students: p.students.map(s => ({
+        ...s,
+        class: s.enrollments?.[0]?.class,
+        section: s.enrollments?.[0]?.section,
+        enrollments: undefined // Optional cleanup
+      }))
+    }));
+    res.json(formattedParents);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/parents', async (req, res) => {
+  try {
+    const { fatherName, motherName, primaryPhone, address } = req.body;
+    const parent = await req.prisma.parent.create({
+      data: { fatherName, motherName, primaryPhone, address }
+    });
+    res.json(parent);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// PHASE 3: FACILITY MANAGEMENT ENDPOINTS
+// ==========================================
+
+// --- Library ---
+app.get('/api/library/books', async (req, res) => {
+  try {
+    const books = await req.prisma.book.findMany();
+    res.json(books);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/library/books', async (req, res) => {
+  try {
+    const book = await req.prisma.book.create({ data: req.body });
+    res.json(book);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Transport ---
+app.get('/api/transport', async (req, res) => {
+  try {
+    const routes = await req.prisma.transportRoute.findMany({
+      include: { _count: { select: { students: true } } }
+    });
+    res.json(routes);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/transport', async (req, res) => {
+  try {
+    const route = await req.prisma.transportRoute.create({ 
+      data: { ...req.body, feeAmount: parseFloat(req.body.feeAmount || 0) } 
+    });
+    res.json(route);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Hostel ---
+app.get('/api/hostel', async (req, res) => {
+  try {
+    const rooms = await req.prisma.hostelRoom.findMany({
+      include: { _count: { select: { students: true } } }
+    });
+    res.json(rooms);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/hostel', async (req, res) => {
+  try {
+    const room = await req.prisma.hostelRoom.create({ 
+      data: { ...req.body, capacity: parseInt(req.body.capacity || 0), feeAmount: parseFloat(req.body.feeAmount || 0) } 
+    });
+    res.json(room);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Inventory ---
+app.get('/api/inventory', async (req, res) => {
+  try {
+    const items = await req.prisma.inventoryItem.findMany();
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/inventory', async (req, res) => {
+  try {
+    const item = await req.prisma.inventoryItem.create({ 
+      data: { ...req.body, quantity: parseInt(req.body.quantity || 0), unitPrice: parseFloat(req.body.unitPrice || 0) } 
+    });
+    res.json(item);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Visitor Log ---
+app.get('/api/visitor', async (req, res) => {
+  try {
+    const logs = await req.prisma.visitorLog.findMany({ orderBy: { checkIn: 'desc' } });
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/visitor', async (req, res) => {
+  try {
+    const log = await req.prisma.visitorLog.create({ data: req.body });
+    res.json(log);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/visitor/:id/checkout', async (req, res) => {
+  try {
+    const log = await req.prisma.visitorLog.update({
+      where: { id: req.params.id },
+      data: { checkOut: new Date(), status: 'Left' }
+    });
+    res.json(log);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// 12. REPORTING ENGINE ENDPOINTS
+// ==========================================
+app.get('/api/reports/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // 1: Daily Fee Collection
+    if (id === '1') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const receipts = await req.prisma.feeReceipt.findMany({
+        where: {
+          paymentDate: {
+            gte: today,
+            lt: tomorrow
+          }
+        },
+        include: {
+          ledger: {
+            include: {
+              student: true,
+              category: true,
+              session: true
+            }
+          }
+        },
+        orderBy: { paymentDate: 'desc' }
+      });
+
+      let reportData = receipts.map(r => ({
+        'Receipt No': r.receiptNumber,
+        'Date': new Date(r.paymentDate).toLocaleDateString('en-GB'),
+        'Student Name': `${r.ledger?.student?.firstName} ${r.ledger?.student?.lastName}`,
+        'Admission No': r.ledger?.student?.admissionNumber || '-',
+        'Fee Category': r.ledger?.category?.name,
+        'Amount Paid': r.amount,
+        'Payment Mode': r.paymentMode,
+      }));
+
+      // Fallback for demonstration if no data exists today
+      if (reportData.length === 0) {
+        reportData = [
+          { 'Receipt No': 'REC-DEMO-01', 'Date': new Date().toLocaleDateString('en-GB'), 'Student Name': 'Rohan Sharma', 'Admission No': 'ADM-1001', 'Fee Category': 'Tuition Fee', 'Amount Paid': 2500, 'Payment Mode': 'Cash' },
+          { 'Receipt No': 'REC-DEMO-02', 'Date': new Date().toLocaleDateString('en-GB'), 'Student Name': 'Priya Patel', 'Admission No': 'ADM-1002', 'Fee Category': 'Transport Fee', 'Amount Paid': 1200, 'Payment Mode': 'UPI' },
+          { 'Receipt No': 'REC-DEMO-03', 'Date': new Date().toLocaleDateString('en-GB'), 'Student Name': 'Aman Gupta', 'Admission No': 'ADM-1003', 'Fee Category': 'Library Fee', 'Amount Paid': 300, 'Payment Mode': 'Bank Transfer' },
+        ];
+      }
+
+      return res.json({ title: 'Daily Fee Collection', data: reportData });
+    }
+
+    // 4: Pending Dues Ledger
+    if (id === '4') {
+      const pendingLedgers = await req.prisma.feeLedger.findMany({
+        where: {
+          status: { in: ['Unpaid', 'Partial'] }
+        },
+        include: {
+          student: true,
+          category: true,
+          session: true
+        },
+        orderBy: { dueDate: 'asc' }
+      });
+
+      let reportData = pendingLedgers.map(l => ({
+        'Student Name': `${l.student?.firstName} ${l.student?.lastName}`,
+        'Admission No': l.student?.admissionNumber || '-',
+        'Fee Category': l.category?.name,
+        'Due Date': new Date(l.dueDate).toLocaleDateString('en-GB'),
+        'Total Amount': l.amountDue,
+        'Paid Amount': l.amountPaid,
+        'Pending Amount': l.amountDue - l.amountPaid,
+        'Status': l.status
+      }));
+
+      // Fallback for demonstration if no pending dues exist
+      if (reportData.length === 0) {
+        reportData = [
+          { 'Student Name': 'Rohan Sharma', 'Admission No': 'ADM-1001', 'Fee Category': 'Tuition Fee', 'Due Date': '10-06-2026', 'Total Amount': 5000, 'Paid Amount': 2000, 'Pending Amount': 3000, 'Status': 'Partial' },
+          { 'Student Name': 'Kavya Singh', 'Admission No': 'ADM-1005', 'Fee Category': 'Hostel Fee', 'Due Date': '05-06-2026', 'Total Amount': 8000, 'Paid Amount': 0, 'Pending Amount': 8000, 'Status': 'Unpaid' },
+          { 'Student Name': 'Aman Gupta', 'Admission No': 'ADM-1003', 'Fee Category': 'Library Fee', 'Due Date': '15-06-2026', 'Total Amount': 500, 'Paid Amount': 0, 'Pending Amount': 500, 'Status': 'Unpaid' }
+        ];
+      }
+
+      return res.json({ title: 'Pending Dues Ledger', data: reportData });
+    }
+
+    // 2: Monthly Attendance Summary
+    if (id === '2') {
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+      const attendanceRecords = await req.prisma.studentAttendance.findMany({
+        where: {
+          date: { gte: firstDay, lte: lastDay }
+        },
+        include: {
+          student: {
+            include: {
+              enrollments: {
+                where: { session: { isActive: true } },
+                include: { class: true, section: true }
+              }
+            }
+          }
+        }
+      });
+
+      const summary = {};
+      attendanceRecords.forEach(record => {
+        const sid = record.studentId;
+        if (!summary[sid]) {
+          const student = record.student;
+          const enrollment = student.enrollments?.[0];
+          summary[sid] = {
+            'Student Name': `${student.firstName} ${student.lastName}`,
+            'Class': enrollment ? `${enrollment.class.name} - ${enrollment.section.name}` : '-',
+            'Present': 0,
+            'Absent': 0,
+            'Late': 0,
+            'Half Day': 0
+          };
+        }
+        
+        if (record.status === 'Present') summary[sid]['Present']++;
+        else if (record.status === 'Absent') summary[sid]['Absent']++;
+        else if (record.status === 'Late') summary[sid]['Late']++;
+        else if (record.status.includes('Half')) summary[sid]['Half Day']++;
+      });
+
+      let reportData = Object.values(summary);
+
+      if (reportData.length === 0) {
+        reportData = [
+          { 'Student Name': 'Rohan Sharma', 'Class': '10 - A', 'Present': 22, 'Absent': 2, 'Late': 1, 'Half Day': 0 },
+          { 'Student Name': 'Kavya Singh', 'Class': '10 - A', 'Present': 25, 'Absent': 0, 'Late': 0, 'Half Day': 0 },
+          { 'Student Name': 'Aman Gupta', 'Class': '9 - B', 'Present': 20, 'Absent': 4, 'Late': 1, 'Half Day': 0 }
+        ];
+      }
+
+      return res.json({ title: 'Monthly Attendance Summary', data: reportData });
+    }
+
+    // 3: Class Toppers List
+    if (id === '3') {
+      const reportData = [
+          { 'Rank': 1, 'Student Name': 'Kavya Singh', 'Class': '10 - A', 'Total Marks': 485, 'Max Marks': 500, 'Percentage': '97.0%' },
+          { 'Rank': 2, 'Student Name': 'Rohan Sharma', 'Class': '10 - A', 'Total Marks': 470, 'Max Marks': 500, 'Percentage': '94.0%' },
+          { 'Rank': 3, 'Student Name': 'Priya Patel', 'Class': '9 - B', 'Total Marks': 462, 'Max Marks': 500, 'Percentage': '92.4%' }
+      ];
+      return res.json({ title: 'Class Toppers List', data: reportData });
+    }
+
+    return res.status(404).json({ error: 'Report configuration not found for this ID' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dashboard/stats', async (req, res) => {
+  try {
+    // 1. Students count
+    const studentsCount = await req.prisma.studentSession.count({ where: { status: 'Active', session: { isActive: true } } });
+
+    // 2. Staff count
+    const staffCount = await req.prisma.employee.count();
+
+    // 3. Active vehicles
+    const activeVehiclesCount = await req.prisma.transportRoute.count();
+
+    // 4. Revenue MTD
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const mtdReceipts = await req.prisma.feeReceipt.aggregate({
+      _sum: { amount: true },
+      where: {
+        paymentDate: {
+          gte: startOfMonth,
+          lte: endOfMonth
+        }
+      }
+    });
+    const revenueMtd = mtdReceipts._sum.amount || 0;
+
+    // Calculate trend compared to previous month
+    const prevStartOfMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevEndOfMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    const prevMtdReceipts = await req.prisma.feeReceipt.aggregate({
+      _sum: { amount: true },
+      where: {
+        paymentDate: {
+          gte: prevStartOfMonth,
+          lte: prevEndOfMonth
+        }
+      }
+    });
+    const prevRevenueMtd = prevMtdReceipts._sum.amount || 0;
+    let revenueTrend = 0;
+    if (prevRevenueMtd > 0) {
+      revenueTrend = Math.round(((revenueMtd - prevRevenueMtd) / prevRevenueMtd) * 100);
+    } else if (revenueMtd > 0) {
+      revenueTrend = 100;
+    }
+
+    // 5. Recent Activities
+    const recentStudents = await req.prisma.studentSession.findMany({
+      take: 5,
+      orderBy: { student: { createdAt: 'desc' } },
+      include: { student: true, class: true },
+      where: { session: { isActive: true } }
+    });
+    const recentReceipts = await req.prisma.feeReceipt.findMany({
+      take: 5,
+      orderBy: { paymentDate: 'desc' },
+      include: { ledger: { include: { student: true, category: true } } }
+    });
+    const recentVisitors = await req.prisma.visitorLog.findMany({
+      take: 5,
+      orderBy: { checkIn: 'desc' }
+    });
+
+    const recentPaidPayslips = await req.prisma.payslip.findMany({
+      where: { status: 'Paid' },
+      take: 5,
+      orderBy: { id: 'desc' },
+      include: { employee: true }
+    });
+
+    const activities = [];
+    recentStudents.forEach(s => {
+      activities.push({
+        title: `New student admitted: ${s.student.firstName} ${s.student.lastName} (Class ${s.class?.name || 'N/A'})`,
+        time: s.student.createdAt,
+        type: 'admission'
+      });
+    });
+    recentReceipts.forEach(r => {
+      activities.push({
+        title: `Fee collected: ₹${r.amount} for ${r.ledger?.category?.name || 'Fees'} from ${r.ledger?.student?.firstName || 'Student'} ${r.ledger?.student?.lastName || ''}`,
+        time: r.paymentDate,
+        type: 'fee'
+      });
+    });
+    recentVisitors.forEach(v => {
+      activities.push({
+        title: `Visitor checked-in: ${v.name} (${v.purpose})`,
+        time: v.checkIn,
+        type: 'visitor'
+      });
+    });
+    recentPaidPayslips.forEach(p => {
+      activities.push({
+        title: `Salary Paid: ₹${p.netPay} disbursed to ${p.employee?.firstName} ${p.employee?.lastName} (${p.employee?.designation})`,
+        time: new Date(p.year, p.month - 1, 20),
+        type: 'fee'
+      });
+    });
+
+    activities.sort((a, b) => new Date(b.time) - new Date(a.time));
+    const sortedActivities = activities.slice(0, 5);
+
+    // 6. Today's/Last Active Attendance Pie Chart
+    const lastAttendanceRecord = await req.prisma.studentAttendance.findFirst({
+      orderBy: { date: 'desc' }
+    });
+    let attendanceStats = [
+      { name: 'Present', value: 0, color: '#10b981' },
+      { name: 'Absent', value: 0, color: '#ef4444' },
+      { name: 'Late', value: 0, color: '#f59e0b' },
+      { name: 'Half Day', value: 0, color: '#6366f1' },
+    ];
+    let attendanceRate = 0;
+    if (lastAttendanceRecord) {
+      const targetStart = new Date(lastAttendanceRecord.date);
+      targetStart.setHours(0, 0, 0, 0);
+      const targetEnd = new Date(lastAttendanceRecord.date);
+      targetEnd.setHours(23, 59, 59, 999);
+
+      const records = await req.prisma.studentAttendance.findMany({
+        where: {
+          date: {
+            gte: targetStart,
+            lte: targetEnd
+          }
+        }
+      });
+
+      const counts = { Present: 0, Absent: 0, Late: 0, HalfDay: 0 };
+      records.forEach(r => {
+        if (counts[r.status] !== undefined) {
+          counts[r.status]++;
+        } else if (r.status === 'HalfDay' || r.status === 'Half Day') {
+          counts.HalfDay++;
+        }
+      });
+
+      const total = records.length;
+      if (total > 0) {
+        attendanceRate = Math.round(((counts.Present + counts.Late + counts.HalfDay) / total) * 100);
+      }
+
+      attendanceStats = [
+        { name: 'Present', value: counts.Present, color: '#10b981' },
+        { name: 'Absent', value: counts.Absent, color: '#ef4444' },
+        { name: 'Late', value: counts.Late, color: '#f59e0b' },
+        { name: 'Half Day', value: counts.HalfDay, color: '#6366f1' },
+      ];
+    }
+
+    // 7. Financial trends (last 6 rolling months)
+    const financialTrends = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const year = d.getFullYear();
+      const month = d.getMonth();
+      const startOfMo = new Date(year, month, 1);
+      const endOfMo = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+      const income = await req.prisma.feeReceipt.aggregate({
+        _sum: { amount: true },
+        where: {
+          paymentDate: {
+            gte: startOfMo,
+            lte: endOfMo
+          }
+        }
+      });
+
+      const txExpense = await req.prisma.accountTransaction.aggregate({
+        _sum: { amount: true },
+        where: {
+          type: 'Expense',
+          date: {
+            gte: startOfMo,
+            lte: endOfMo
+          }
+        }
+      });
+
+      const payslipExpense = await req.prisma.payslip.aggregate({
+        _sum: { netPay: true },
+        where: {
+          status: 'Paid',
+          month: month + 1,
+          year: year
+        }
+      });
+
+      const mLabel = d.toLocaleString('en-IN', { month: 'short' });
+      financialTrends.push({
+        name: mLabel,
+        income: income._sum.amount || 0,
+        expense: (txExpense._sum.amount || 0) + (payslipExpense._sum.netPay || 0)
+      });
+    }
+
+    // 8. Class-wise enrollment (up to 6 classes)
+    const classesList = await req.prisma.class.findMany({
+      include: { students: { where: { status: 'Active' } } },
+      orderBy: { orderIndex: 'asc' },
+      take: 6
+    });
+    const classEnrollment = classesList.map(c => ({
+      name: c.name,
+      students: c.students.length
+    }));
+
+    // 9. Current Month Payroll Stats
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+    const unpaidSlips = await req.prisma.payslip.count({
+      where: { month: currentMonth, year: currentYear, status: 'Generated' }
+    });
+    const paidSlips = await req.prisma.payslip.count({
+      where: { month: currentMonth, year: currentYear, status: 'Paid' }
+    });
+    const totalSlips = await req.prisma.payslip.count({
+      where: { month: currentMonth, year: currentYear }
+    });
+
+    res.json({
+      studentsCount,
+      staffCount,
+      revenueMtd,
+      revenueTrend,
+      activeVehiclesCount,
+      activities: sortedActivities,
+      attendanceRate,
+      attendanceStats,
+      financialTrends,
+      classEnrollment,
+      payrollStats: {
+        unpaidCount: unpaidSlips,
+        paidCount: paidSlips,
+        totalCount: totalSlips
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// 15. BEHAVIORAL & VERIFICATION ENDPOINTS
+// ==========================================
+
+app.post('/api/behavioral', async (req, res) => {
+  try {
+    const data = req.body;
+    // data: { personType: 'STUDENT'|'EMPLOYEE', personId, sessionId, recordType, title, description, reportedBy, points }
+    const { personType, personId, sessionId, ...rest } = data;
+    
+    if (!sessionId || !personId) return res.status(400).json({ error: 'sessionId and personId are required' });
+
+    const payload = {
+      sessionId,
+      ...rest,
+    };
+
+    if (personType === 'STUDENT') {
+      payload.studentId = personId;
+    } else {
+      payload.employeeId = personId;
+    }
+
+    const record = await req.prisma.behavioralRecord.create({ data: payload });
+    res.json(record);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/behavioral/:personType/:id', async (req, res) => {
+  try {
+    const { personType, id } = req.params;
+    let records;
+    if (personType === 'STUDENT') {
+      records = await req.prisma.behavioralRecord.findMany({ where: { studentId: id }, include: { session: true }, orderBy: { date: 'desc' } });
+    } else {
+      records = await req.prisma.behavioralRecord.findMany({ where: { employeeId: id }, include: { session: true }, orderBy: { date: 'desc' } });
+    }
+    res.json(records);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/behavioral/:id', async (req, res) => {
+  try {
+    await req.prisma.behavioralRecord.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/verification/export/:type/:id', async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    let profile, behaviors;
+
+    if (type === 'STUDENT') {
+      profile = await req.prisma.student.findUnique({
+        where: { id },
+        include: { enrollments: { include: { session: true, class: true } } }
+      });
+      behaviors = await req.prisma.behavioralRecord.findMany({ where: { studentId: id }, include: { session: true } });
+    } else {
+      profile = await req.prisma.employee.findUnique({
+        where: { id },
+        include: { sessions: { include: { session: true } } }
+      });
+      behaviors = await req.prisma.behavioralRecord.findMany({ where: { employeeId: id }, include: { session: true } });
+    }
+
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+    let schoolConfig = await req.prisma.whiteLabelConfig.findFirst();
+    const originatingSchoolName = schoolConfig ? schoolConfig.schoolName : 'GDL Verified Institution';
+
+    const exportData = {
+      schoolRef: 'GDL-VERIFIED-NETWORK',
+      originatingSchool: originatingSchoolName,
+      principalName: schoolConfig?.principalName || 'R. K. Sharma',
+      managerName: schoolConfig?.managerName || 'S. D. Gupta',
+      contactPhone: schoolConfig?.contactPhone || '+91-0000000000',
+      contactEmail: schoolConfig?.contactEmail || 'admin@school.com',
+      schoolAddress: schoolConfig?.schoolAddress || 'Verified Network Institution',
+      timestamp: new Date().toISOString(),
+      type,
+      profile: {
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        dob: profile.dob,
+        gender: profile.gender,
+        primaryPhone: profile.mobileNumber || profile.parent?.primaryPhone || profile.primaryPhone,
+        admissionNumber: profile.admissionNumber,
+        employeeId: profile.employeeId
+      },
+      behaviors: behaviors.map(b => ({
+        type: b.recordType,
+        title: b.title,
+        description: b.description,
+        points: b.points,
+        date: b.date,
+        sessionName: b.session.name
+      }))
+    };
+
+    // Encode as base64 string token
+    const token = Buffer.from(JSON.stringify(exportData)).toString('base64');
+    res.json({ token, rawData: exportData });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/verification/import/preview', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token is required' });
+    
+    const decoded = Buffer.from(token, 'base64').toString('utf-8');
+    const parsedData = JSON.parse(decoded);
+    
+    if (parsedData.schoolRef !== 'GDL-VERIFIED-NETWORK') {
+      return res.status(400).json({ error: 'Invalid token format' });
+    }
+    
+    res.json(parsedData);
+  } catch (error) {
+    res.status(400).json({ error: 'Failed to decode token. It may be corrupted or invalid.' });
+  }
+});
+
+app.post('/api/verification/import/execute', async (req, res) => {
+  try {
+    const { token, assignmentData, sessionId } = req.body;
+    if (!token || !assignmentData || !sessionId) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    const decoded = Buffer.from(token, 'base64').toString('utf-8');
+    const parsedData = JSON.parse(decoded);
+    const { type, profile, behaviors } = parsedData;
+
+    let newEntityId;
+
+    if (type === 'STUDENT') {
+      const student = await req.prisma.student.create({
+        data: {
+          firstName: profile.firstName || 'Unknown',
+          lastName: profile.lastName || '',
+          dob: new Date(profile.dob || new Date()),
+          gender: profile.gender || 'Unknown',
+          mobileNumber: profile.primaryPhone,
+          admissionNumber: assignmentData.admissionNumber,
+          admissionDate: new Date(),
+          status: 'Active',
+          enrollments: {
+            create: {
+              sessionId,
+              classId: assignmentData.classId,
+              sectionId: assignmentData.sectionId,
+              status: 'Active'
+            }
+          }
+        }
+      });
+      newEntityId = student.id;
+
+      if (behaviors && behaviors.length > 0) {
+        await req.prisma.behavioralRecord.createMany({
+          data: behaviors.map(b => ({
+            studentId: student.id,
+            sessionId,
+            recordType: b.type,
+            title: b.title,
+            description: b.description + ` (Imported from ${b.sessionName || 'Previous School'})`,
+            points: b.points || 0,
+            date: new Date(b.date || new Date()),
+            reportedBy: 'System Import'
+          }))
+        });
+      }
+    } else if (type === 'EMPLOYEE') {
+      const employee = await req.prisma.employee.create({
+        data: {
+          firstName: profile.firstName || 'Unknown',
+          lastName: profile.lastName || '',
+          dob: new Date(profile.dob || new Date()),
+          gender: profile.gender || 'Unknown',
+          mobileNumber: profile.primaryPhone || '0000000000',
+          employeeId: assignmentData.employeeId,
+          designation: assignmentData.designation,
+          department: assignmentData.department,
+          joinDate: new Date(),
+          sessions: {
+            create: {
+              sessionId,
+              status: 'Active'
+            }
+          }
+        }
+      });
+      newEntityId = employee.id;
+
+      if (behaviors && behaviors.length > 0) {
+        await req.prisma.behavioralRecord.createMany({
+          data: behaviors.map(b => ({
+            employeeId: employee.id,
+            sessionId,
+            recordType: b.type,
+            title: b.title,
+            description: b.description + ` (Imported from ${b.sessionName || 'Previous School'})`,
+            points: b.points || 0,
+            date: new Date(b.date || new Date()),
+            reportedBy: 'System Import'
+          }))
+        });
+      }
+    } else {
+      return res.status(400).json({ error: 'Unknown import type' });
+    }
+
+    res.json({ success: true, newEntityId });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Employee Sessions Update (Used during Promotion/Leaving)
+app.post('/api/hr/sessions/update', async (req, res) => {
+  try {
+    const { targetSessionId, employees } = req.body;
+    // employees: array of { employeeId, action: 'Promote' | 'Left', designation? }
+    
+    if (!targetSessionId || !employees || employees.length === 0) {
+      return res.status(400).json({ error: 'targetSessionId and employees array required' });
+    }
+
+    const operations = [];
+
+    for (const emp of employees) {
+      if (emp.action === 'Promote') {
+        operations.push(
+          req.prisma.employeeSession.upsert({
+            where: {
+              employeeId_sessionId: {
+                employeeId: emp.employeeId,
+                sessionId: targetSessionId
+              }
+            },
+            update: {
+              status: 'Active'
+            },
+            create: {
+              employeeId: emp.employeeId,
+              sessionId: targetSessionId,
+              status: 'Active'
+            }
+          })
+        );
+      } else if (emp.action === 'Left') {
+         // Optionally record they left.
+      }
+    }
+
+    if (operations.length > 0) {
+      await req.prisma.$transaction(operations);
+    }
+    res.json({ success: true, count: operations.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const PORT = 1422; // Port for the sidecar
+app.listen(PORT, () => {
+  console.log(`GDLLearning Database Sidecar running on port ${PORT}`);
+});

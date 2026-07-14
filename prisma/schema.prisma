@@ -1,0 +1,684 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ==========================================
+// 1. SYSTEM & SECURITY
+// ==========================================
+
+model License {
+  id             String   @id @default(cuid())
+  schoolName     String
+  ownerName      String
+  mobileNumber   String
+  licenseKey     String   @unique
+  hardwarePrint  String   @unique
+  activationDate DateTime @default(now())
+  expiryDate     DateTime
+  licenseType    String // Trial, Monthly, Yearly, Lifetime
+  isActive       Boolean  @default(true)
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique // "Super Admin", "Admin", "Teacher"
+  description String?
+  permissions String   // JSON string of permissions array
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  users       User[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  
+  roleId       String?
+  role         Role?    @relation(fields: [roleId], references: [id])
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  isActive     Boolean  @default(true)
+
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+  employeeId String?   @unique
+}
+
+model WhiteLabelConfig {
+  id            String  @id @default(cuid())
+  schoolName    String
+  logoUrl       String?
+  themeColor    String  @default("#4F46E5") // Indigo by default
+  receiptPrefix String  @default("REC-")
+
+  // Enterprise Configurations
+  schoolStartTime String? @default("08:00")
+  schoolEndTime   String? @default("14:00")
+  lunchStartTime  String? @default("12:00")
+  lunchEndTime    String? @default("12:30")
+  principalName   String?
+  managerName     String?
+  schoolAddress   String?
+  contactPhone    String?
+  contactEmail    String?
+
+  updatedAt DateTime @updatedAt
+}
+
+// ==========================================
+// 2. ACADEMIC MANAGEMENT
+// ==========================================
+
+model AcademicSession {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g., "2024-2025"
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(false)
+
+  terms             Term[]
+  classes           Class[]
+  studentSessions   StudentSession[]
+  feeLedgers        FeeLedger[]
+  attendances       StudentAttendance[]
+  employeeSessions  EmployeeSession[]
+  behavioralRecords BehavioralRecord[]
+  masterSubjects    MasterSubject[]
+}
+
+model Term {
+  id        String          @id @default(cuid())
+  name      String // e.g., "Term 1", "Half Yearly"
+  months    String? // e.g., JSON string '["June", "July"]' or comma-separated
+  sessionId String
+  session   AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exams     Exam[]
+}
+
+model Class {
+  id        String          @id @default(cuid())
+  name      String // e.g., "Class 1", "Class 10"
+  sessionId String
+  session   AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // Enterprise Limits & Promotion
+  maxCapacity    Int @default(40)
+  orderIndex     Int @default(1) // To sort class sequence properly
+  periodDuration Int @default(45) // Duration in minutes
+
+  nextClassId     String?
+  nextClass       Class?  @relation("PromotionMapping", fields: [nextClassId], references: [id])
+  previousClasses Class[] @relation("PromotionMapping")
+
+  sections        Section[]
+  subjects        Subject[]
+  studentSessions StudentSession[]
+}
+
+model Section {
+  id      String @id @default(cuid())
+  name    String // e.g., "A", "B"
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  maxCapacity Int @default(40)
+
+  teacherId String? // Class Teacher
+  teacher   Employee? @relation("ClassTeacher", fields: [teacherId], references: [id])
+
+  studentSessions StudentSession[]
+  timetables      Timetable[]
+  subjects        Subject[]
+}
+
+model MasterSubject {
+  id        String           @id @default(cuid())
+  name      String
+  code      String?
+  sessionId String?
+  session   AcademicSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  subjects Subject[]
+}
+
+model Subject {
+  id              String        @id @default(cuid())
+  masterSubjectId String
+  masterSubject   MasterSubject @relation(fields: [masterSubjectId], references: [id], onDelete: Cascade)
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  sectionId String?
+  section   Section? @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  isOptional Boolean @default(false)
+
+  teacherId String?
+  teacher   Employee? @relation("SubjectTeacher", fields: [teacherId], references: [id])
+
+  startTime  String?
+  endTime    String?
+  daysOfWeek String?
+
+  exams ExamSubject[]
+}
+
+// ==========================================
+// 3. STUDENT & PARENT MANAGEMENT
+// ==========================================
+
+model Student {
+  id               String   @id @default(cuid())
+  admissionNumber  String   @unique
+  enrollmentNumber String?  @unique
+  firstName        String
+  lastName         String
+  dob              DateTime
+  gender           String
+  bloodGroup       String?
+  religion         String?
+  category         String?
+  aadharNumber     String?  @unique
+
+  // Academic
+  admissionDate DateTime
+  // Removed global classId/sectionId. Use StudentSession instead.
+
+  // Contacts
+  mobileNumber   String?
+  email          String?
+  address        String?
+  qualifications String?
+
+  // Relations
+  parentId    String?
+  parent      Parent?          @relation(fields: [parentId], references: [id])
+  enrollments StudentSession[]
+
+  // Modules
+  attendances       StudentAttendance[]
+  feeLedgers        FeeLedger[]
+  marks             ExamMark[]
+  libraryIssues     LibraryIssue[]
+  behavioralRecords BehavioralRecord[]
+
+  transportRouteId String?
+  transportRoute   TransportRoute? @relation(fields: [transportRouteId], references: [id])
+
+  hostelRoomId String?
+  hostelRoom   HostelRoom? @relation(fields: [hostelRoomId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  status    String   @default("Active") // Active, Transferred, Alumni
+}
+
+model Parent {
+  id             String  @id @default(cuid())
+  fatherName     String
+  motherName     String
+  guardianName   String?
+  primaryPhone   String
+  email          String?
+  address        String?
+  qualifications String?
+
+  students Student[]
+}
+
+model StudentSession {
+  id         String  @id @default(cuid())
+  studentId  String
+  sessionId  String
+  classId    String
+  sectionId  String
+  rollNumber String?
+  status     String  @default("Active") // Active, Promoted, Retained, Left
+
+  student Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  session AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  class   Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section Section         @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, sessionId])
+}
+
+// ==========================================
+// 4. HR & PAYROLL MANAGEMENT
+// ==========================================
+
+model Employee {
+  id             String   @id @default(cuid())
+  employeeId     String   @unique
+  firstName      String
+  lastName       String
+  designation    String
+  department     String
+  joinDate       DateTime
+  dob            DateTime
+  gender         String
+  bloodGroup     String?
+  countryCode    String   @default("+91")
+  mobileNumber   String
+  email          String?
+  address        String?
+  qualifications String?
+
+  currency   String @default("₹")
+  baseSalary Float  @default(0.0)
+
+  // User Account
+  user User?
+
+  // Academic
+  classSections Section[] @relation("ClassTeacher")
+  subjects      Subject[] @relation("SubjectTeacher")
+
+  attendances EmployeeAttendance[]
+  payslips    Payslip[]
+  leaves      LeaveRequest[]
+
+  // Phase 2 Exams
+  examDuties      ExamDuty[]
+  examEvaluations ExamEvaluationDuty[]
+
+  sessions          EmployeeSession[]
+  behavioralRecords BehavioralRecord[]
+}
+
+model EmployeeSession {
+  id         String @id @default(cuid())
+  employeeId String
+  sessionId  String
+  status     String @default("Active") // Active, Left, OnLeave
+
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  session  AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, sessionId])
+}
+
+// ==========================================
+// 5. ATTENDANCE MANAGEMENT
+// ==========================================
+
+model StudentAttendance {
+  id        String   @id @default(cuid())
+  studentId String
+  sessionId String
+  date      DateTime
+  status    String // Present, Absent, Late, HalfDay
+  remarks   String?
+
+  student Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  session AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, sessionId, date])
+}
+
+model EmployeeAttendance {
+  id         String   @id @default(cuid())
+  employeeId String
+  date       DateTime
+  status     String // Present, Absent, Late, HalfDay
+  remarks    String?
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, date])
+}
+
+model LeaveRequest {
+  id         String   @id @default(cuid())
+  employeeId String
+  startDate  DateTime
+  endDate    DateTime
+  type       String // Casual, Sick, Earned
+  status     String   @default("Pending") // Pending, Approved, Rejected
+  reason     String?
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+}
+
+// ==========================================
+// 6. FEE & ACCOUNTING MANAGEMENT
+// ==========================================
+
+model FeeCategory {
+  id        String  @id @default(cuid())
+  name      String // Tuition Fee, Transport Fee, Library Fee
+  amount    Float
+  frequency String // Monthly, Quarterly, Yearly
+  classIds  String? // JSON string array of class IDs, e.g. '["cls_1"]', or null for all classes
+
+  ledgers FeeLedger[]
+}
+
+model FeeLedger {
+  id            String   @id @default(cuid())
+  studentId     String
+  sessionId     String
+  feeCategoryId String
+  dueDate       DateTime
+  amountDue     Float
+  amountPaid    Float    @default(0)
+  status        String   @default("Unpaid") // Unpaid, Partial, Paid
+
+  student  Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  session  AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  category FeeCategory     @relation(fields: [feeCategoryId], references: [id])
+
+  receipts FeeReceipt[]
+}
+
+model FeeReceipt {
+  id            String   @id @default(cuid())
+  receiptNumber String   @unique
+  ledgerId      String
+  amount        Float
+  paymentMode   String // Cash, Cheque, Bank Transfer
+  paymentDate   DateTime @default(now())
+
+  ledger FeeLedger @relation(fields: [ledgerId], references: [id])
+}
+
+model AccountTransaction {
+  id          String   @id @default(cuid())
+  type        String // Income, Expense
+  category    String // Fee Collection, Salary, Bills, etc.
+  amount      Float
+  date        DateTime @default(now())
+  description String?
+  referenceNo String?
+}
+
+// ==========================================
+// 7. PAYROLL MANAGEMENT
+// ==========================================
+
+model Payslip {
+  id         String @id @default(cuid())
+  employeeId String
+  month      Int
+  year       Int
+  basicPay   Float
+  allowances Float  @default(0)
+  deductions Float  @default(0)
+  netPay     Float
+  status     String @default("Generated") // Generated, Paid
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, month, year])
+}
+
+// ==========================================
+// 8. EXAM MANAGEMENT
+// ==========================================
+
+enum ExamMode {
+  ONLINE
+  OFFLINE
+  HYBRID
+}
+
+enum QuestionPaperType {
+  OBJECTIVE
+  SUBJECTIVE
+  MIXED
+  EXTERNAL_PDF
+}
+
+enum EvaluationMode {
+  AUTO_GRADED
+  ONLINE_MANUAL
+  OFFLINE_BUNDLE
+}
+
+model Exam {
+  id        String   @id @default(cuid())
+  name      String
+  termId    String
+  startDate DateTime
+  endDate   DateTime
+
+  term     Term          @relation(fields: [termId], references: [id])
+  subjects ExamSubject[]
+}
+
+model ExamSubject {
+  id        String   @id @default(cuid())
+  examId    String
+  subjectId String
+  examDate  DateTime
+  maxMarks  Float
+  passMarks Float
+
+  // Phase 2 Modality & Paper
+  mode            ExamMode          @default(OFFLINE)
+  paperType       QuestionPaperType @default(SUBJECTIVE)
+  durationMins    Int               @default(120)
+  questionPaperId String?
+
+  exam          Exam                 @relation(fields: [examId], references: [id])
+  subject       Subject              @relation(fields: [subjectId], references: [id])
+  marks         ExamMark[]
+  questionPaper QuestionPaper?       @relation(fields: [questionPaperId], references: [id])
+  duties        ExamDuty[]
+  evaluations   ExamEvaluationDuty[]
+}
+
+model QuestionPaper {
+  id         String  @id @default(cuid())
+  title      String
+  totalMarks Float
+  fileUrl    String? // For offline printing or reference
+  isDigital  Boolean @default(false)
+
+  examSubjects ExamSubject[]
+  questions    Question[]
+}
+
+model Question {
+  id              String  @id @default(cuid())
+  questionPaperId String
+  type            String // e.g. 'MCQ', 'SUBJECTIVE', 'TRUE_FALSE', 'SECTION_HEADER'
+  text            String
+  marks           Float
+  options         String? // JSON string array of options for MCQ
+  correctAnswer   String? // The correct option or string
+  imageUrl        String? // Optional image URL
+  isRequired      Boolean @default(false)
+  orderIndex      Int     @default(0)
+
+  questionPaper QuestionPaper @relation(fields: [questionPaperId], references: [id], onDelete: Cascade)
+}
+
+model ExamDuty {
+  id            String   @id @default(cuid())
+  examSubjectId String
+  teacherId     String
+  roomName      String? // Just the name or number of the classroom/hall
+  dutyDate      DateTime
+  startTime     DateTime
+  endTime       DateTime
+
+  examSubject ExamSubject @relation(fields: [examSubjectId], references: [id])
+  teacher     Employee    @relation(fields: [teacherId], references: [id])
+
+  @@unique([teacherId, dutyDate, startTime])
+}
+
+model ExamEvaluationDuty {
+  id            String         @id @default(cuid())
+  examSubjectId String
+  evaluatorId   String // Employee Id
+  evalMode      EvaluationMode @default(OFFLINE_BUNDLE)
+  dueDate       DateTime?
+  status        String         @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED
+
+  examSubject ExamSubject @relation(fields: [examSubjectId], references: [id])
+  evaluator   Employee    @relation(fields: [evaluatorId], references: [id])
+}
+
+model ExamMark {
+  id            String  @id @default(cuid())
+  examSubjectId String
+  studentId     String
+  marksObtained Float
+  remarks       String?
+
+  examSubject ExamSubject @relation(fields: [examSubjectId], references: [id])
+  student     Student     @relation(fields: [studentId], references: [id])
+
+  @@unique([examSubjectId, studentId])
+}
+
+// ==========================================
+// 9. LIBRARY MANAGEMENT
+// ==========================================
+
+model Book {
+  id        String  @id @default(cuid())
+  title     String
+  author    String
+  isbn      String?
+  category  String
+  quantity  Int     @default(1)
+  available Int     @default(1)
+
+  issues LibraryIssue[]
+}
+
+model LibraryIssue {
+  id         String    @id @default(cuid())
+  bookId     String
+  studentId  String
+  issueDate  DateTime  @default(now())
+  dueDate    DateTime
+  returnDate DateTime?
+  fineAmount Float     @default(0)
+  status     String    @default("Issued") // Issued, Returned
+
+  book    Book    @relation(fields: [bookId], references: [id])
+  student Student @relation(fields: [studentId], references: [id])
+}
+
+// ==========================================
+// 10. TIMETABLE
+// ==========================================
+
+model Timetable {
+  id        String @id @default(cuid())
+  sectionId String
+  dayOfWeek String // Monday, Tuesday...
+  periodNo  Int
+  startTime String // e.g., "09:00"
+  endTime   String // e.g., "09:45"
+  subjectId String
+
+  section Section @relation(fields: [sectionId], references: [id])
+}
+
+// ==========================================
+// 11. TRANSPORT MANAGEMENT
+// ==========================================
+
+model TransportRoute {
+  id          String  @id @default(cuid())
+  name        String // e.g. "Route 1 - City Center"
+  vehicleNo   String
+  driverName  String?
+  driverPhone String?
+  feeAmount   Float   @default(0)
+
+  students Student[]
+}
+
+// ==========================================
+// 12. HOSTEL MANAGEMENT
+// ==========================================
+
+model HostelRoom {
+  id         String @id @default(cuid())
+  roomNo     String @unique
+  hostelName String // e.g. "Boys Hostel A"
+  roomType   String // "AC", "Non-AC", "Dormitory"
+  capacity   Int
+  feeAmount  Float  @default(0)
+
+  students Student[]
+}
+
+// ==========================================
+// 13. INVENTORY MANAGEMENT
+// ==========================================
+
+model InventoryItem {
+  id          String  @id @default(cuid())
+  name        String
+  category    String // "Stationery", "Electronics", "Furniture"
+  quantity    Int     @default(0)
+  unitPrice   Float   @default(0)
+  description String?
+}
+
+// ==========================================
+// 14. VISITOR MANAGEMENT
+// ==========================================
+
+model VisitorLog {
+  id         String    @id @default(cuid())
+  name       String
+  phone      String
+  purpose    String
+  whomToMeet String?
+  checkIn    DateTime  @default(now())
+  checkOut   DateTime?
+  status     String    @default("In-Campus") // "In-Campus", "Left"
+}
+
+// ==========================================
+// 15. BEHAVIORAL & VERIFICATION
+// ==========================================
+
+model BehavioralRecord {
+  id          String   @id @default(cuid())
+  studentId   String?
+  employeeId  String?
+  sessionId   String
+  recordType  String // COMPLAINT, ACHIEVEMENT, REMARK, WARNING
+  title       String
+  description String
+  date        DateTime @default(now())
+  reportedBy  String?
+  points      Int      @default(0)
+
+  student  Student?        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  employee Employee?       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  session  AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// 16. SUPER ADMIN & LICENSING
+// ==========================================
+
+model ClientToken {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  schoolName   String
+  tokenString  String
+  permissions  String   // JSON array of permission keys
+  generatedAt  DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

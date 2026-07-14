@@ -1,0 +1,80 @@
+name: Build and Sign Releases
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-sign:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Apple Certificate (macOS only)
+        if: matrix.os == 'macos-latest'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # Create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          # Import certificate and provisioning profile from secrets
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import certificate to keychain
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+      - name: Build & Sign Application
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Windows Code Signing Variables (Tauri uses these for .exe / .msi)
+          TAURI_SIGN_KEY: ${{ secrets.WINDOWS_SIGNING_KEY }} # Base64 encoded pfx/p12
+          TAURI_SIGN_KEY_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+          
+          # macOS Notarization Variables
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "GDLLearning ERP ${{ github.ref_name }}"
+          releaseBody: "Automated signed release generated via GitHub Actions."
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.os == 'macos-latest' && '--target aarch64-apple-darwin' || '' }}
