@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Settings, Book, Users, User, TrendingUp, Save, Clock, MapPin, Phone, Mail, Building, Plus, X, CheckCircle2, AlertTriangle, Calendar, Trash2, Edit3, Hash, BookOpen, GraduationCap, Trophy, Microscope, Pencil, Palette, Compass, Atom, Library, Briefcase, Sun, Coffee, UserCheck, ArrowUpDown, Filter, ChevronLeft, ChevronRight, ChevronDown, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import HRModule from '../hr/HRModule';
+import Modal from '../../components/ui/Modal';
 
 const apiBase = 'http://localhost:1422/api';
 
@@ -2119,455 +2120,375 @@ export default function AcademicModule() {
       )}
 
       {/* Premium Add Class Modal */}
-      <AnimatePresence>
-        {isClassModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
-              animate={{ opacity: 1, backdropFilter: "blur(8px)" }}
-              exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
-              onClick={() => setClassModalOpen(false)}
-              className="absolute inset-0 bg-black/40 dark:bg-black/60 transition-all"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="relative w-full max-w-lg max-h-[calc(100vh-4rem)] bg-card border border-white/10 rounded-[2rem] premium-shadow overflow-hidden z-10 text-left flex flex-col"
-            >
-              {/* Modal Header */}
-              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black/5 dark:bg-white/5 shrink-0">
-                <div>
-                  <h2 className="text-xl font-bold text-foreground">{classForm.id ? 'Edit Class' : 'Add New Class'}</h2>
-                  <p className="text-muted-foreground text-xs mt-1">{classForm.id ? 'Update class details and sections.' : 'Configure class capacity and default sections.'}</p>
-                </div>
-                <button onClick={() => setClassModalOpen(false)} className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground">
-                  <X className="w-5 h-5" />
-                </button>
+      <Modal
+        isOpen={isClassModalOpen}
+        onClose={() => setClassModalOpen(false)}
+        title={classForm.id ? 'Edit Class' : 'Add New Class'}
+        icon={Book}
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleClassSubmit} className="space-y-6 text-left">
+          <div className="grid grid-cols-2 gap-5">
+            <div className="group">
+              <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Class Number / Level <span className="text-red-500">*</span></label>
+              <div className="relative flex items-center">
+                <span className="absolute left-5 font-bold text-muted-foreground text-sm">Class</span>
+                <input 
+                  required
+                  pattern="[0-9A-Za-z\s\-]{1,10}"
+                  type="text" 
+                  placeholder="e.g. 10 or X"
+                  value={classForm.name}
+                  onChange={e => setClassForm({...classForm, name: e.target.value.replace(/^Class\s*/i, '')})}
+                  className="peer w-full pl-16 pr-5 py-3 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-bold focus:ring-4 focus:ring-purple-500/20 outline-none transition-all text-sm" 
+                />
               </div>
-
-              {/* Form Element (Flex Scrollable) */}
-              <form onSubmit={handleClassSubmit} className="flex-1 flex flex-col overflow-hidden bg-background/50 text-left">
-                <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar">
-                  <div className="grid grid-cols-2 gap-5">
-                    <div className="group">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Class Number / Level <span className="text-red-500">*</span></label>
-                      <div className="relative flex items-center">
-                        <span className="absolute left-5 font-bold text-muted-foreground text-sm">Class</span>
-                        <input 
-                          required
-                          pattern="[0-9A-Za-z\s\-]{1,10}"
-                          type="text" 
-                          placeholder="e.g. 10 or X"
-                          value={classForm.name}
-                          onChange={e => setClassForm({...classForm, name: e.target.value.replace(/^Class\s*/i, '')})}
-                          className="peer w-full pl-16 pr-5 py-3 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-bold focus:ring-4 focus:ring-purple-500/20 outline-none transition-all text-sm" 
-                        />
-                      </div>
-                    </div>
-                    <div className="group">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Max Capacity <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <input 
-                          required
-                          type="number" 
-                          min="1"
-                          max="200"
-                          placeholder="e.g. 40"
-                          value={classForm.maxCapacity}
-                          onChange={e => setClassForm({...classForm, maxCapacity: e.target.value})}
-                          className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl px-5 py-3 outline-none focus:ring-4 focus:ring-emerald-500/20 text-foreground transition-all font-mono text-sm" 
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-5">
-                    <div className="group">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">Sections (Comma Separated)</label>
-                      <div className="relative">
-                        <input 
-                          type="text" 
-                          pattern="^[A-Za-z0-9](,\s*[A-Za-z0-9])*$"
-                          placeholder="e.g. A, B, C"
-                          value={classForm.sections}
-                          onChange={e => setClassForm({...classForm, sections: e.target.value})}
-                          className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl px-5 py-3 outline-none focus:ring-4 focus:ring-indigo-500/20 text-foreground transition-all text-sm" 
-                        />
-                      </div>
-                    </div>
-                    <div className="group">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-amber-500 transition-colors">Order Index</label>
-                      <div className="relative">
-                        <input 
-                          required
-                          type="number" 
-                          min="1"
-                          max="100"
-                          placeholder="e.g. 1"
-                          value={classForm.orderIndex}
-                          onChange={e => setClassForm({...classForm, orderIndex: e.target.value})}
-                          className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-amber-500/50 rounded-2xl px-5 py-3 outline-none focus:ring-4 focus:ring-amber-500/20 text-foreground transition-all font-mono text-sm" 
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1">
-                    <div className="group">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-pink-500 transition-colors">Period Duration <span className="text-red-500">*</span></label>
-                      <select 
-                        required
-                        value={classForm.periodDuration}
-                        onChange={e => setClassForm({...classForm, periodDuration: e.target.value})}
-                        className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-pink-500/50 rounded-2xl px-5 py-3 outline-none focus:ring-4 focus:ring-pink-500/20 text-foreground transition-all font-bold text-sm cursor-pointer"
-                      >
-                        <option value="30">30 Minutes</option>
-                        <option value="35">35 Minutes</option>
-                        <option value="40">40 Minutes</option>
-                        <option value="45">45 Minutes</option>
-                        <option value="50">50 Minutes</option>
-                        <option value="60">60 Minutes</option>
-                        <option value="90">90 Minutes</option>
-                      </select>
-                      <p className="mt-1.5 text-[11px] text-muted-foreground font-medium">Controls automatic end-time calculation for subjects.</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Sticky Footer */}
-                <div className="p-6 border-t border-black/5 dark:border-white/10 flex justify-end gap-3 bg-background shrink-0 rounded-b-[2rem]">
-                  <button type="button" onClick={() => setClassModalOpen(false)} className="px-5 py-3 rounded-xl font-bold text-xs text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={isSubmittingClass} className="px-6 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-xl font-bold text-xs flex items-center gap-2 premium-shadow hover:scale-105 transition-all disabled:opacity-50">
-                    {isSubmittingClass ? 'Saving...' : <><div className="bg-white/20 p-1 rounded-full"><CheckCircle2 className="w-4 h-4" /></div> {classForm.id ? 'Update Class' : 'Confirm Class'}</>}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+            </div>
+            <div className="group">
+              <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Max Capacity <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <input 
+                  required
+                  type="number" 
+                  min="1"
+                  max="200"
+                  placeholder="e.g. 40"
+                  value={classForm.maxCapacity}
+                  onChange={e => setClassForm({...classForm, maxCapacity: e.target.value})}
+                  className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl px-5 py-3 outline-none focus:ring-4 focus:ring-emerald-500/20 text-foreground transition-all font-mono text-sm" 
+                />
+              </div>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
 
-      {/* Edit School Profile Modal */}
-      <AnimatePresence>
-        {isEditingSchoolProfile && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
-              animate={{ opacity: 1, backdropFilter: "blur(8px)" }}
-              exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
-              onClick={() => setIsEditingSchoolProfile(false)}
-              className="absolute inset-0 bg-black/40 dark:bg-black/60 transition-all"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="relative w-full max-w-4xl max-h-[calc(100vh-4rem)] bg-card border border-white/10 rounded-[2rem] premium-shadow overflow-hidden z-10 text-left flex flex-col"
-            >
-              {/* Modal Header */}
-              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black/5 dark:bg-white/5 shrink-0">
-                <div>
-                  <h2 className="text-xl font-bold text-foreground flex items-center gap-3">
-                    <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-500"><Settings className="w-5 h-5" /></div>
-                    Edit Core Settings
-                  </h2>
-                  <p className="text-muted-foreground text-xs mt-1">Configure school operational timings, hierarchy, and contact details.</p>
-                </div>
-                <button onClick={() => setIsEditingSchoolProfile(false)} className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground">
-                  <X className="w-5 h-5" />
-                </button>
+          <div className="grid grid-cols-2 gap-5">
+            <div className="group">
+              <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">Sections (Comma Separated)</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  pattern="^[A-Za-z0-9](,\s*[A-Za-z0-9])*$"
+                  placeholder="e.g. A, B, C"
+                  value={classForm.sections}
+                  onChange={e => setClassForm({...classForm, sections: e.target.value})}
+                  className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl px-5 py-3 outline-none focus:ring-4 focus:ring-indigo-500/20 text-foreground transition-all text-sm" 
+                />
               </div>
-
-              {/* Form Element */}
-              <form onSubmit={handleSchoolSave} className="flex-1 flex flex-col overflow-hidden bg-background/50 text-left">
-                <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Timings */}
-                    <div className="space-y-6">
-                      <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Operational Timings</h4>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">Start Time <span className="text-red-500">*</span></label>
-                          <div className="relative">
-                            <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-indigo-500 transition-colors" />
-                            <input 
-                              required
-                              type="time" 
-                              value={schoolConfig.schoolStartTime || ''}
-                              onChange={e => setSchoolConfig({...schoolConfig, schoolStartTime: e.target.value})}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-indigo-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
-                            />
-                          </div>
-                        </div>
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">End Time <span className="text-red-500">*</span></label>
-                          <div className="relative">
-                            <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-indigo-500 transition-colors" />
-                            <input 
-                              required
-                              type="time" 
-                              value={schoolConfig.schoolEndTime || ''}
-                              onChange={e => setSchoolConfig({...schoolConfig, schoolEndTime: e.target.value})}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-indigo-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-orange-500 transition-colors">Lunch Start <span className="text-red-500">*</span></label>
-                          <div className="relative">
-                            <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-orange-500 transition-colors" />
-                            <input 
-                              required
-                              type="time" 
-                              value={schoolConfig.lunchStartTime || ''}
-                              onChange={e => setSchoolConfig({...schoolConfig, lunchStartTime: e.target.value})}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-orange-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-orange-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
-                            />
-                          </div>
-                        </div>
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-orange-500 transition-colors">Lunch End <span className="text-red-500">*</span></label>
-                          <div className="relative">
-                            <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-orange-500 transition-colors" />
-                            <input 
-                              required
-                              type="time" 
-                              value={schoolConfig.lunchEndTime || ''}
-                              onChange={e => setSchoolConfig({...schoolConfig, lunchEndTime: e.target.value})}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-orange-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-orange-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Hierarchy */}
-                    <div className="space-y-6">
-                      <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Management Hierarchy</h4>
-                      <div className="space-y-5">
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Principal Name <span className="text-red-500">*</span></label>
-                          <div className="relative">
-                            <Users className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-purple-500 transition-colors" />
-                            <input 
-                              required
-                              pattern="[A-Za-z\s\.]{3,50}"
-                              title="Please enter a valid name (letters and spaces only)"
-                              type="text" 
-                              placeholder="e.g. Dr. A. P. Sharma"
-                              value={schoolConfig.principalName || ''}
-                              onChange={e => setSchoolConfig({...schoolConfig, principalName: e.target.value})}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-purple-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
-                            />
-                          </div>
-                        </div>
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Manager Name</label>
-                          <div className="relative">
-                            <Users className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-purple-500 transition-colors" />
-                            <input 
-                              pattern="[A-Za-z\s\.]{3,50}"
-                              type="text" 
-                              placeholder="e.g. Mr. R. K. Gupta"
-                              value={schoolConfig.managerName || ''}
-                              onChange={e => setSchoolConfig({...schoolConfig, managerName: e.target.value})}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-purple-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Contact */}
-                    <div className="space-y-6 md:col-span-2">
-                      <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Contact Details</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Primary Phone <span className="text-red-500">*</span></label>
-                          <div className="relative">
-                            <Phone className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-emerald-500 transition-colors" />
-                            <input 
-                              required
-                              pattern="[0-9]{10}"
-                              title="Phone number must be exactly 10 digits"
-                              maxLength="10"
-                              type="tel" 
-                              placeholder="10-digit number"
-                              value={schoolConfig.contactPhone || ''}
-                              onChange={e => {
-                                const val = e.target.value.replace(/\D/g, '');
-                                if (val.length <= 10) setSchoolConfig({...schoolConfig, contactPhone: val});
-                              }}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl font-mono font-bold focus:ring-4 focus:ring-emerald-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
-                            />
-                          </div>
-                        </div>
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-amber-500 transition-colors">Email Address <span className="text-red-500">*</span></label>
-                          <div className="relative">
-                            <Mail className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-amber-500 transition-colors" />
-                            <input 
-                              required
-                              type="email" 
-                              maxLength="100"
-                              pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                              title="Please enter a valid email address"
-                              placeholder="school@example.com"
-                              value={schoolConfig.contactEmail || ''}
-                              onChange={e => setSchoolConfig({...schoolConfig, contactEmail: e.target.value})}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-amber-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-amber-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
-                            />
-                          </div>
-                        </div>
-                        <div className="group">
-                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-rose-500 transition-colors">Full Address <span className="text-red-500">*</span></label>
-                          <div className="relative">
-                            <MapPin className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-rose-500 transition-colors" />
-                            <input 
-                              required
-                              type="text" 
-                              placeholder="Street, City, Zip"
-                              value={schoolConfig.schoolAddress || ''}
-                              onChange={e => setSchoolConfig({...schoolConfig, schoolAddress: e.target.value})}
-                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-rose-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-rose-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-rose-500/20 placeholder:text-muted-foreground/40"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Modal Footer */}
-                <div className="p-6 border-t border-white/10 bg-black/5 dark:bg-white/5 flex justify-end gap-3 shrink-0 rounded-b-[2rem]">
-                  <button type="button" onClick={() => setIsEditingSchoolProfile(false)} className="px-6 py-3 rounded-xl text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 font-bold transition-all text-xs">
-                    Cancel
-                  </button>
-                  <button type="submit" className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:scale-105 transition-all text-xs">
-                    <Save className="w-4 h-4" /> Save Configuration
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+            </div>
+            <div className="group">
+              <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-amber-500 transition-colors">Order Index</label>
+              <div className="relative">
+                <input 
+                  required
+                  type="number" 
+                  min="1"
+                  max="100"
+                  placeholder="e.g. 1"
+                  value={classForm.orderIndex}
+                  onChange={e => setClassForm({...classForm, orderIndex: e.target.value})}
+                  className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-amber-500/50 rounded-2xl px-5 py-3 outline-none focus:ring-4 focus:ring-amber-500/20 text-foreground transition-all font-mono text-sm" 
+                />
+              </div>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
 
-      {/* Premium Add Session Modal */}
-      <AnimatePresence>
-        {isSessionModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
-              animate={{ opacity: 1, backdropFilter: "blur(8px)" }}
-              exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
-              onClick={() => setSessionModalOpen(false)}
-              className="absolute inset-0 bg-black/40 dark:bg-black/60 transition-all"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="relative w-full max-w-2xl bg-card border border-white/10 rounded-[2rem] premium-shadow overflow-hidden z-10 text-left"
-            >
-              <div className="p-8 border-b border-white/10 flex justify-between items-center bg-black/5 dark:bg-white/5">
-                <div>
-                  <h2 className="text-2xl font-bold text-foreground">{sessionForm.id ? 'Edit Academic Session' : 'Create Academic Session'}</h2>
-                  <p className="text-muted-foreground text-sm mt-1">{sessionForm.id ? 'Update the details for this academic year.' : 'Start a new school year/term.'}</p>
-                </div>
-                <button onClick={() => setSessionModalOpen(false)} className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
+          <div className="grid grid-cols-1">
+            <div className="group">
+              <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 group-focus-within:text-pink-500 transition-colors">Period Duration <span className="text-red-500">*</span></label>
+              <select 
+                required
+                value={classForm.periodDuration}
+                onChange={e => setClassForm({...classForm, periodDuration: e.target.value})}
+                className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-pink-500/50 rounded-2xl px-5 py-3 outline-none focus:ring-4 focus:ring-pink-500/20 text-foreground transition-all font-bold text-sm cursor-pointer"
+              >
+                <option value="30">30 Minutes</option>
+                <option value="35">35 Minutes</option>
+                <option value="40">40 Minutes</option>
+                <option value="45">45 Minutes</option>
+                <option value="50">50 Minutes</option>
+                <option value="60">60 Minutes</option>
+                <option value="90">90 Minutes</option>
+              </select>
+              <p className="mt-1.5 text-[11px] text-muted-foreground font-medium">Controls automatic end-time calculation for subjects.</p>
+            </div>
+          </div>
 
-              <form onSubmit={handleSessionSubmit} className="p-8 space-y-6 bg-background/50 text-left">
+          {/* Modal Footer */}
+          <div className="flex justify-end gap-3 pt-6 border-t border-black/5 dark:border-white/5">
+            <button type="button" onClick={() => setClassModalOpen(false)} className="px-5 py-3 rounded-xl font-bold text-xs text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={isSubmittingClass} className="px-6 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-xl font-bold text-xs flex items-center gap-2 premium-shadow hover:scale-105 transition-all disabled:opacity-50">
+              {isSubmittingClass ? 'Saving...' : <><div className="bg-white/20 p-1 rounded-full"><CheckCircle2 className="w-4 h-4" /></div> {classForm.id ? 'Update Class' : 'Confirm Class'}</>}
+            </button>
+          </div>
+        </form>
+      </Modal>
+         {/* Edit School Profile Modal */}
+      <Modal
+        isOpen={isEditingSchoolProfile}
+        onClose={() => setIsEditingSchoolProfile(false)}
+        title="Edit Core Settings"
+        icon={Settings}
+        maxWidth="max-w-4xl"
+      >
+        <form onSubmit={handleSchoolSave} className="space-y-6 text-left">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Timings */}
+            <div className="space-y-6">
+              <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Operational Timings</h4>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="group">
-                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Session Name <span className="text-red-500">*</span></label>
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">Start Time <span className="text-red-500">*</span></label>
                   <div className="relative">
-                    <Hash className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-emerald-500 transition-colors" />
+                    <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-indigo-500 transition-colors" />
                     <input 
                       required
-                      pattern="[0-9]{4}-[0-9]{4}"
-                      type="text" 
-                      placeholder="e.g. 2024-2025"
-                      value={sessionForm.name}
-                      onChange={e => setSessionForm({...sessionForm, name: e.target.value})}
-                      className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl pl-12 pr-5 py-3.5 outline-none focus:ring-4 focus:ring-emerald-500/20 text-foreground transition-all font-mono font-bold focus:invalid:border-red-500 focus:invalid:ring-red-500/20" 
+                      type="time" 
+                      value={schoolConfig.schoolStartTime || ''}
+                      onChange={e => setSchoolConfig({...schoolConfig, schoolStartTime: e.target.value})}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-indigo-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
                     />
-                    <p className="mt-1.5 text-xs text-red-500 font-medium opacity-0 peer-invalid:peer-focus:opacity-100 transition-opacity absolute -bottom-5 left-1">Use format YYYY-YYYY (e.g., 2024-2025).</p>
                   </div>
                 </div>
-
-                <div className="grid grid-cols-2 gap-6 mt-6">
-                  <div className="group">
-                    <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Start Date <span className="text-red-500">*</span></label>
-                    <div className="relative">
-                      <Calendar className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-emerald-500 transition-colors" />
-                      <input 
-                        required
-                        type="date" 
-                        value={sessionForm.startDate}
-                        onChange={e => setSessionForm({...sessionForm, startDate: e.target.value})}
-                        className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl pl-12 pr-5 py-3.5 outline-none focus:ring-4 focus:ring-emerald-500/20 text-foreground transition-all font-mono focus:invalid:border-red-500 focus:invalid:ring-red-500/20" 
-                      />
-                      <p className="mt-1.5 text-xs text-red-500 font-medium opacity-0 peer-invalid:peer-focus:opacity-100 transition-opacity absolute -bottom-5 left-1">Start Date is required.</p>
-                    </div>
-                  </div>
-                  <div className="group">
-                    <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-rose-500 transition-colors">End Date <span className="text-red-500">*</span></label>
-                    <div className="relative">
-                      <Calendar className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-rose-500 transition-colors" />
-                      <input 
-                        required
-                        type="date" 
-                        value={sessionForm.endDate}
-                        onChange={e => setSessionForm({...sessionForm, endDate: e.target.value})}
-                        className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-rose-500/50 rounded-2xl pl-12 pr-5 py-3.5 outline-none focus:ring-4 focus:ring-rose-500/20 text-foreground transition-all font-mono focus:invalid:border-red-500 focus:invalid:ring-red-500/20" 
-                      />
-                      <p className="mt-1.5 text-xs text-red-500 font-medium opacity-0 peer-invalid:peer-focus:opacity-100 transition-opacity absolute -bottom-5 left-1">End Date is required.</p>
-                    </div>
+                <div className="group">
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">End Time <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-indigo-500 transition-colors" />
+                    <input 
+                      required
+                      type="time" 
+                      value={schoolConfig.schoolEndTime || ''}
+                      onChange={e => setSchoolConfig({...schoolConfig, schoolEndTime: e.target.value})}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-indigo-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
+                    />
                   </div>
                 </div>
-
-                <div className="mt-8">
-                  <label htmlFor="makeActive" className="flex items-start gap-4 p-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10 transition-colors">
-                    <div className="pt-0.5">
-                      <input 
-                         type="checkbox" 
-                         id="makeActive"
-                         checked={sessionForm.makeActive}
-                         onChange={e => setSessionForm({...sessionForm, makeActive: e.target.checked})}
-                         className="w-5 h-5 rounded-md border-emerald-500/50 text-emerald-500 focus:ring-emerald-500/20 focus:ring-offset-0 cursor-pointer"
-                      />
-                    </div>
-                    <div>
-                      <span className="block font-bold text-emerald-600 dark:text-emerald-400">Set as Active Session</span>
-                      <span className="block text-xs text-muted-foreground font-medium mt-1">This will automatically deactivate all other previously created academic sessions.</span>
-                    </div>
-                  </label>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="group">
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-orange-500 transition-colors">Lunch Start <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-orange-500 transition-colors" />
+                    <input 
+                      required
+                      type="time" 
+                      value={schoolConfig.lunchStartTime || ''}
+                      onChange={e => setSchoolConfig({...schoolConfig, lunchStartTime: e.target.value})}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-orange-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-orange-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
+                    />
+                  </div>
                 </div>
-
-                <div className="pt-6 mt-8 border-t border-black/5 dark:border-white/10 flex justify-end gap-4 bg-background p-4 rounded-b-[2rem] -mx-8 -mb-8">
-                  <button type="button" onClick={() => setSessionModalOpen(false)} className="px-6 py-3.5 rounded-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={isSubmittingSession} className="px-8 py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl font-bold flex items-center gap-3 premium-shadow hover:scale-105 transition-all disabled:opacity-50">
-                    {isSubmittingSession ? 'Saving...' : <><div className="bg-white/20 p-1 rounded-full"><CheckCircle2 className="w-4 h-4" /></div> {sessionForm.id ? 'Update Session' : 'Start Session'}</>}
-                  </button>
+                <div className="group">
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-orange-500 transition-colors">Lunch End <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-orange-500 transition-colors" />
+                    <input 
+                      required
+                      type="time" 
+                      value={schoolConfig.lunchEndTime || ''}
+                      onChange={e => setSchoolConfig({...schoolConfig, lunchEndTime: e.target.value})}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-orange-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-orange-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
+                    />
+                  </div>
                 </div>
-              </form>
-            </motion.div>
+              </div>
+            </div>
+
+            {/* Hierarchy */}
+            <div className="space-y-6">
+              <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Management Hierarchy</h4>
+              <div className="space-y-5">
+                <div className="group">
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Principal Name <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Users className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-purple-500 transition-colors" />
+                    <input 
+                      required
+                      pattern="[A-Za-z\s\.]{3,50}"
+                      title="Please enter a valid name (letters and spaces only)"
+                      type="text" 
+                      placeholder="e.g. Dr. A. P. Sharma"
+                      value={schoolConfig.principalName || ''}
+                      onChange={e => setSchoolConfig({...schoolConfig, principalName: e.target.value})}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-purple-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                    />
+                  </div>
+                </div>
+                <div className="group">
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Manager Name</label>
+                  <div className="relative">
+                    <Users className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-purple-500 transition-colors" />
+                    <input 
+                      pattern="[A-Za-z\s\.]{3,50}"
+                      type="text" 
+                      placeholder="e.g. Mr. R. K. Gupta"
+                      value={schoolConfig.managerName || ''}
+                      onChange={e => setSchoolConfig({...schoolConfig, managerName: e.target.value})}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-purple-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Contact */}
+            <div className="space-y-6 md:col-span-2">
+              <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Contact Details</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="group">
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Primary Phone <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Phone className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-emerald-500 transition-colors" />
+                    <input 
+                      required
+                      pattern="[0-9]{10}"
+                      title="Phone number must be exactly 10 digits"
+                      maxLength="10"
+                      type="tel" 
+                      placeholder="10-digit number"
+                      value={schoolConfig.contactPhone || ''}
+                      onChange={e => {
+                        const val = e.target.value.replace(/\D/g, '');
+                        if (val.length <= 10) setSchoolConfig({...schoolConfig, contactPhone: val});
+                      }}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl font-mono font-bold focus:ring-4 focus:ring-emerald-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                    />
+                  </div>
+                </div>
+                <div className="group">
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-amber-500 transition-colors">Email Address <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Mail className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-amber-500 transition-colors" />
+                    <input 
+                      required
+                      type="email" 
+                      maxLength="100"
+                      pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                      title="Please enter a valid email address"
+                      placeholder="school@example.com"
+                      value={schoolConfig.contactEmail || ''}
+                      onChange={e => setSchoolConfig({...schoolConfig, contactEmail: e.target.value})}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-amber-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-amber-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                    />
+                  </div>
+                </div>
+                <div className="group">
+                  <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-rose-500 transition-colors">Full Address <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <MapPin className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-rose-500 transition-colors" />
+                    <input 
+                      required
+                      type="text" 
+                      placeholder="Street, City, Zip"
+                      value={schoolConfig.schoolAddress || ''}
+                      onChange={e => setSchoolConfig({...schoolConfig, schoolAddress: e.target.value})}
+                      className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-rose-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-rose-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+
+          {/* Modal Footer */}
+          <div className="flex justify-end gap-3 pt-6 border-t border-black/5 dark:border-white/5">
+            <button type="button" onClick={() => setIsEditingSchoolProfile(false)} className="px-6 py-3 rounded-xl border border-black/10 dark:border-white/10 text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 font-bold transition-all text-xs">
+              Cancel
+            </button>
+            <button type="submit" className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:scale-105 transition-all text-xs">
+              <Save className="w-4 h-4" /> Save Configuration
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Premium Add Session Modal */}
+      <Modal
+        isOpen={isSessionModalOpen}
+        onClose={() => setSessionModalOpen(false)}
+        title={sessionForm.id ? 'Edit Academic Session' : 'Create Academic Session'}
+        icon={Hash}
+        maxWidth="max-w-2xl"
+      >
+        <form onSubmit={handleSessionSubmit} className="space-y-6 text-left">
+          <div className="group">
+            <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Session Name <span className="text-red-500">*</span></label>
+            <div className="relative">
+              <Hash className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-emerald-500 transition-colors" />
+              <input 
+                required
+                pattern="[0-9]{4}-[0-9]{4}"
+                type="text" 
+                placeholder="e.g. 2024-2025"
+                value={sessionForm.name}
+                onChange={e => setSessionForm({...sessionForm, name: e.target.value})}
+                className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl pl-12 pr-5 py-3.5 outline-none focus:ring-4 focus:ring-emerald-500/20 text-foreground transition-all font-mono font-bold focus:invalid:border-red-500 focus:invalid:ring-red-500/20" 
+              />
+              <p className="mt-1.5 text-xs text-red-500 font-medium opacity-0 peer-invalid:peer-focus:opacity-100 transition-opacity absolute -bottom-5 left-1">Use format YYYY-YYYY (e.g., 2024-2025).</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6 mt-6">
+            <div className="group">
+              <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Start Date <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <Calendar className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-emerald-500 transition-colors" />
+                <input 
+                  required
+                  type="date" 
+                  value={sessionForm.startDate}
+                  onChange={e => setSessionForm({...sessionForm, startDate: e.target.value})}
+                  className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl pl-12 pr-5 py-3.5 outline-none focus:ring-4 focus:ring-emerald-500/20 text-foreground transition-all font-mono focus:invalid:border-red-500 focus:invalid:ring-red-500/20" 
+                />
+                <p className="mt-1.5 text-xs text-red-500 font-medium opacity-0 peer-invalid:peer-focus:opacity-100 transition-opacity absolute -bottom-5 left-1">Start Date is required.</p>
+              </div>
+            </div>
+            <div className="group">
+              <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-rose-500 transition-colors">End Date <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <Calendar className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-rose-500 transition-colors" />
+                <input 
+                  required
+                  type="date" 
+                  value={sessionForm.endDate}
+                  onChange={e => setSessionForm({...sessionForm, endDate: e.target.value})}
+                  className="peer w-full bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-rose-500/50 rounded-2xl pl-12 pr-5 py-3.5 outline-none focus:ring-4 focus:ring-rose-500/20 text-foreground transition-all font-mono focus:invalid:border-red-500 focus:invalid:ring-red-500/20" 
+                />
+                <p className="mt-1.5 text-xs text-red-500 font-medium opacity-0 peer-invalid:peer-focus:opacity-100 transition-opacity absolute -bottom-5 left-1">End Date is required.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <label htmlFor="makeActive" className="flex items-start gap-4 p-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10 transition-colors">
+              <div className="pt-0.5">
+                <input 
+                   type="checkbox" 
+                   id="makeActive"
+                   checked={sessionForm.makeActive}
+                   onChange={e => setSessionForm({...sessionForm, makeActive: e.target.checked})}
+                   className="w-5 h-5 rounded-md border-emerald-500/50 text-emerald-500 focus:ring-emerald-500/20 focus:ring-offset-0 cursor-pointer"
+                />
+              </div>
+              <div>
+                <span className="block font-bold text-emerald-600 dark:text-emerald-400">Set as Active Session</span>
+                <span className="block text-xs text-muted-foreground font-medium mt-1">This will automatically deactivate all other previously created academic sessions.</span>
+              </div>
+            </label>
+          </div>
+
+          {/* Modal Footer */}
+          <div className="flex justify-end gap-3 pt-6 border-t border-black/5 dark:border-white/5">
+            <button type="button" onClick={() => setSessionModalOpen(false)} className="px-6 py-3 rounded-xl border border-black/10 dark:border-white/10 text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 font-bold transition-all text-xs">
+              Cancel
+            </button>
+            <button type="submit" disabled={isSubmittingSession} className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl font-bold flex items-center gap-2 hover:scale-105 transition-all text-xs disabled:opacity-50">
+              {isSubmittingSession ? 'Saving...' : <><div className="bg-white/20 p-1 rounded-full"><CheckCircle2 className="w-4 h-4" /></div> {sessionForm.id ? 'Update Session' : 'Start Session'}</>}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Premium Add Master Subject Modal */}
       <AnimatePresence>
