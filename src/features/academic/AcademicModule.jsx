@@ -834,7 +834,7 @@ export default function AcademicModule() {
             <h3 className="text-2xl font-black flex items-center gap-3">
               <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-500"><Building className="w-7 h-7" /></div> School Profile
             </h3>
-            {(!isEditingSchoolProfile && schoolConfig.id) && (
+            {schoolConfig.id && (
               <button 
                 onClick={() => setIsEditingSchoolProfile(true)}
                 className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-3 hover:scale-105 transition-all premium-shadow shadow-blue-500/20"
@@ -844,7 +844,7 @@ export default function AcademicModule() {
             )}
           </div>
 
-          {(!isEditingSchoolProfile && schoolConfig.id) ? (
+          {schoolConfig.id ? (
             /* Beautiful View Mode */
             <div className="relative glass-panel p-1 rounded-[2.5rem] group overflow-hidden shadow-xl transition-all duration-500">
               {/* Dynamic Inner Glow */}
@@ -945,186 +945,19 @@ export default function AcademicModule() {
               </div>
             </div>
           ) : (
-            /* Edit Form Mode */
-            <form onSubmit={handleSchoolSave} className="relative glass-panel p-8 rounded-[2rem] border border-blue-500/20 dark:border-blue-500/20 premium-shadow text-left bg-card overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
-              
-              <div className="flex justify-between items-center mb-8">
-                <h3 className="text-2xl font-black flex items-center gap-3">
-                  <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-500"><Settings className="w-7 h-7" /></div>
-                  Edit Core Settings
-                </h3>
-                {schoolConfig.id && (
-                  <button type="button" onClick={() => setIsEditingSchoolProfile(false)} className="p-2 text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors">
-                    <X className="w-6 h-6" />
-                  </button>
-                )}
+            /* First-time configure placeholder */
+            <div className="glass-panel p-12 rounded-[2.5rem] text-center space-y-6 border border-dashed border-blue-500/30 bg-card text-left">
+              <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto text-blue-500"><Building className="w-8 h-8" /></div>
+              <div className="text-center">
+                <h4 className="text-xl font-bold text-foreground">No School Configuration Found</h4>
+                <p className="text-muted-foreground text-sm mt-1">Please configure your school timings and details to get started.</p>
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Timings */}
-                <div className="space-y-6">
-                  <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Operational Timings</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">Start Time <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-indigo-500 transition-colors" />
-                        <input 
-                          required
-                          type="time" 
-                          value={schoolConfig.schoolStartTime || ''}
-                          onChange={e => setSchoolConfig({...schoolConfig, schoolStartTime: e.target.value})}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-indigo-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
-                        />
-                      </div>
-                    </div>
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">End Time <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-indigo-500 transition-colors" />
-                        <input 
-                          required
-                          type="time" 
-                          value={schoolConfig.schoolEndTime || ''}
-                          onChange={e => setSchoolConfig({...schoolConfig, schoolEndTime: e.target.value})}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-indigo-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-orange-500 transition-colors">Lunch Start <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-orange-500 transition-colors" />
-                        <input 
-                          required
-                          type="time" 
-                          value={schoolConfig.lunchStartTime || ''}
-                          onChange={e => setSchoolConfig({...schoolConfig, lunchStartTime: e.target.value})}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-orange-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-orange-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
-                        />
-                      </div>
-                    </div>
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-orange-500 transition-colors">Lunch End <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-orange-500 transition-colors" />
-                        <input 
-                          required
-                          type="time" 
-                          value={schoolConfig.lunchEndTime || ''}
-                          onChange={e => setSchoolConfig({...schoolConfig, lunchEndTime: e.target.value})}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-orange-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-orange-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Hierarchy */}
-                <div className="space-y-6">
-                  <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Management Hierarchy</h4>
-                  <div className="space-y-5">
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Principal Name <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <Users className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-purple-500 transition-colors" />
-                        <input 
-                          required
-                          pattern="[A-Za-z\s\.]{3,50}"
-                          title="Please enter a valid name (letters and spaces only)"
-                          type="text" 
-                          placeholder="e.g. Dr. A. P. Sharma"
-                          value={schoolConfig.principalName || ''}
-                          onChange={e => setSchoolConfig({...schoolConfig, principalName: e.target.value})}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-purple-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
-                        />
-                      </div>
-                    </div>
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Manager Name</label>
-                      <div className="relative">
-                        <Users className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-purple-500 transition-colors" />
-                        <input 
-                          pattern="[A-Za-z\s\.]{3,50}"
-                          type="text" 
-                          placeholder="e.g. Mr. R. K. Gupta"
-                          value={schoolConfig.managerName || ''}
-                          onChange={e => setSchoolConfig({...schoolConfig, managerName: e.target.value})}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-purple-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Contact */}
-                <div className="space-y-6 md:col-span-2">
-                  <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Contact Details</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Primary Phone <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <Phone className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-emerald-500 transition-colors" />
-                        <input 
-                          required
-                          pattern="[0-9]{10}"
-                          title="Phone number must be exactly 10 digits"
-                          maxLength="10"
-                          type="tel" 
-                          placeholder="10-digit number"
-                          value={schoolConfig.contactPhone || ''}
-                          onChange={e => {
-                            const val = e.target.value.replace(/\D/g, '');
-                            if (val.length <= 10) setSchoolConfig({...schoolConfig, contactPhone: val});
-                          }}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl font-mono font-bold focus:ring-4 focus:ring-emerald-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
-                        />
-                      </div>
-                    </div>
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-amber-500 transition-colors">Email Address <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <Mail className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-amber-500 transition-colors" />
-                        <input 
-                          required
-                          type="email" 
-                          maxLength="100"
-                          pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                          title="Please enter a valid email address"
-                          placeholder="school@example.com"
-                          value={schoolConfig.contactEmail || ''}
-                          onChange={e => setSchoolConfig({...schoolConfig, contactEmail: e.target.value})}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-amber-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-amber-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
-                        />
-                      </div>
-                    </div>
-                    <div className="group">
-                      <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-rose-500 transition-colors">Full Address <span className="text-red-500">*</span></label>
-                      <div className="relative">
-                        <MapPin className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-rose-500 transition-colors" />
-                        <input 
-                          required
-                          type="text" 
-                          placeholder="Street, City, Zip"
-                          value={schoolConfig.schoolAddress || ''}
-                          onChange={e => setSchoolConfig({...schoolConfig, schoolAddress: e.target.value})}
-                          className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-rose-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-rose-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-rose-500/20 placeholder:text-muted-foreground/40"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-10 flex justify-end pt-6 border-t border-black/5 dark:border-white/5">
-                <button type="submit" className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-8 py-3.5 rounded-2xl font-bold flex items-center gap-3 hover:scale-105 transition-all shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(79,70,229,0.5)]">
-                  <Save className="w-5 h-5" /> Save Configuration
+              <div className="flex justify-center">
+                <button onClick={() => setIsEditingSchoolProfile(true)} className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white px-6 py-3 rounded-xl font-bold">
+                  Configure School Setup
                 </button>
               </div>
-            </form>
+            </div>
           )}
         </div>
       )}
@@ -2410,6 +2243,215 @@ export default function AcademicModule() {
                   </button>
                   <button type="submit" disabled={isSubmittingClass} className="px-6 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-xl font-bold text-xs flex items-center gap-2 premium-shadow hover:scale-105 transition-all disabled:opacity-50">
                     {isSubmittingClass ? 'Saving...' : <><div className="bg-white/20 p-1 rounded-full"><CheckCircle2 className="w-4 h-4" /></div> {classForm.id ? 'Update Class' : 'Confirm Class'}</>}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit School Profile Modal */}
+      <AnimatePresence>
+        {isEditingSchoolProfile && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
+              animate={{ opacity: 1, backdropFilter: "blur(8px)" }}
+              exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
+              onClick={() => setIsEditingSchoolProfile(false)}
+              className="absolute inset-0 bg-black/40 dark:bg-black/60 transition-all"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+              className="relative w-full max-w-4xl max-h-[calc(100vh-4rem)] bg-card border border-white/10 rounded-[2rem] premium-shadow overflow-hidden z-10 text-left flex flex-col"
+            >
+              {/* Modal Header */}
+              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black/5 dark:bg-white/5 shrink-0">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground flex items-center gap-3">
+                    <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-500"><Settings className="w-5 h-5" /></div>
+                    Edit Core Settings
+                  </h2>
+                  <p className="text-muted-foreground text-xs mt-1">Configure school operational timings, hierarchy, and contact details.</p>
+                </div>
+                <button onClick={() => setIsEditingSchoolProfile(false)} className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Form Element */}
+              <form onSubmit={handleSchoolSave} className="flex-1 flex flex-col overflow-hidden bg-background/50 text-left">
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Timings */}
+                    <div className="space-y-6">
+                      <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Operational Timings</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">Start Time <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-indigo-500 transition-colors" />
+                            <input 
+                              required
+                              type="time" 
+                              value={schoolConfig.schoolStartTime || ''}
+                              onChange={e => setSchoolConfig({...schoolConfig, schoolStartTime: e.target.value})}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-indigo-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
+                            />
+                          </div>
+                        </div>
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-indigo-500 transition-colors">End Time <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-indigo-500 transition-colors" />
+                            <input 
+                              required
+                              type="time" 
+                              value={schoolConfig.schoolEndTime || ''}
+                              onChange={e => setSchoolConfig({...schoolConfig, schoolEndTime: e.target.value})}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-indigo-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-indigo-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-orange-500 transition-colors">Lunch Start <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-orange-500 transition-colors" />
+                            <input 
+                              required
+                              type="time" 
+                              value={schoolConfig.lunchStartTime || ''}
+                              onChange={e => setSchoolConfig({...schoolConfig, lunchStartTime: e.target.value})}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-orange-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-orange-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
+                            />
+                          </div>
+                        </div>
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-orange-500 transition-colors">Lunch End <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <Clock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-orange-500 transition-colors" />
+                            <input 
+                              required
+                              type="time" 
+                              value={schoolConfig.lunchEndTime || ''}
+                              onChange={e => setSchoolConfig({...schoolConfig, lunchEndTime: e.target.value})}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-orange-500/50 rounded-2xl font-mono focus:ring-4 focus:ring-orange-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Hierarchy */}
+                    <div className="space-y-6">
+                      <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Management Hierarchy</h4>
+                      <div className="space-y-5">
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Principal Name <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <Users className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-purple-500 transition-colors" />
+                            <input 
+                              required
+                              pattern="[A-Za-z\s\.]{3,50}"
+                              title="Please enter a valid name (letters and spaces only)"
+                              type="text" 
+                              placeholder="e.g. Dr. A. P. Sharma"
+                              value={schoolConfig.principalName || ''}
+                              onChange={e => setSchoolConfig({...schoolConfig, principalName: e.target.value})}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-purple-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                            />
+                          </div>
+                        </div>
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-purple-500 transition-colors">Manager Name</label>
+                          <div className="relative">
+                            <Users className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-purple-500 transition-colors" />
+                            <input 
+                              pattern="[A-Za-z\s\.]{3,50}"
+                              type="text" 
+                              placeholder="e.g. Mr. R. K. Gupta"
+                              value={schoolConfig.managerName || ''}
+                              onChange={e => setSchoolConfig({...schoolConfig, managerName: e.target.value})}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-purple-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-purple-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Contact */}
+                    <div className="space-y-6 md:col-span-2">
+                      <h4 className="font-black text-muted-foreground uppercase tracking-widest text-xs border-b border-black/5 dark:border-white/5 pb-2">Contact Details</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-emerald-500 transition-colors">Primary Phone <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <Phone className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-emerald-500 transition-colors" />
+                            <input 
+                              required
+                              pattern="[0-9]{10}"
+                              title="Phone number must be exactly 10 digits"
+                              maxLength="10"
+                              type="tel" 
+                              placeholder="10-digit number"
+                              value={schoolConfig.contactPhone || ''}
+                              onChange={e => {
+                                const val = e.target.value.replace(/\D/g, '');
+                                if (val.length <= 10) setSchoolConfig({...schoolConfig, contactPhone: val});
+                              }}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-emerald-500/50 rounded-2xl font-mono font-bold focus:ring-4 focus:ring-emerald-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                            />
+                          </div>
+                        </div>
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-amber-500 transition-colors">Email Address <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <Mail className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-amber-500 transition-colors" />
+                            <input 
+                              required
+                              type="email" 
+                              maxLength="100"
+                              pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                              title="Please enter a valid email address"
+                              placeholder="school@example.com"
+                              value={schoolConfig.contactEmail || ''}
+                              onChange={e => setSchoolConfig({...schoolConfig, contactEmail: e.target.value})}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-amber-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-amber-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-red-500/20 placeholder:text-muted-foreground/40"
+                            />
+                          </div>
+                        </div>
+                        <div className="group">
+                          <label className="block text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2 group-focus-within:text-rose-500 transition-colors">Full Address <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <MapPin className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/50 group-focus-within:text-rose-500 transition-colors" />
+                            <input 
+                              required
+                              type="text" 
+                              placeholder="Street, City, Zip"
+                              value={schoolConfig.schoolAddress || ''}
+                              onChange={e => setSchoolConfig({...schoolConfig, schoolAddress: e.target.value})}
+                              className="peer w-full pl-12 pr-4 py-3.5 bg-black/5 dark:bg-white/5 border border-transparent group-focus-within:border-rose-500/50 rounded-2xl font-medium focus:ring-4 focus:ring-rose-500/20 outline-none transition-all focus:invalid:border-red-500 focus:invalid:ring-rose-500/20 placeholder:text-muted-foreground/40"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="p-6 border-t border-white/10 bg-black/5 dark:bg-white/5 flex justify-end gap-3 shrink-0 rounded-b-[2rem]">
+                  <button type="button" onClick={() => setIsEditingSchoolProfile(false)} className="px-6 py-3 rounded-xl text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 font-bold transition-all text-xs">
+                    Cancel
+                  </button>
+                  <button type="submit" className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:scale-105 transition-all text-xs">
+                    <Save className="w-4 h-4" /> Save Configuration
                   </button>
                 </div>
               </form>
